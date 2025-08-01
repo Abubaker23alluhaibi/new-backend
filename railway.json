@@ -17,7 +17,7 @@
         "PORT": "10000",
         "MONGO_URI": "mongodb+srv://1223BAKErKreem:Akincilar12AltajiBaGHDad22@cluster0.d2mdyuw.mongodb.net/tabibiq?retryWrites=true&w=majority",
         "JWT_SECRET": "tabibiq_jwt_secret_2024_secure_key_xyz789_production_environment",
-        "CORS_ORIGIN": "https://tabib-iq.vercel.app"
+        "CORS_ORIGIN": "https://new-frontend-livid-beta.vercel.app"
       }
     }
   }

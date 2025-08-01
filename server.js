@@ -13,6 +13,7 @@ const allowedOrigins = [
   'https://www.tabib-iq.com',
   'https://tabib-iq.com',
   'https://tabib-iq-frontend.vercel.app',
+  'https://new-frontend-livid-beta.vercel.app',
   'http://localhost:3000'
 ];
 
