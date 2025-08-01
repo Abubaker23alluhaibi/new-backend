@@ -14,6 +14,7 @@ const allowedOrigins = [
   'https://tabib-iq.com',
   'https://tabib-iq-frontend.vercel.app',
   'https://new-frontend-livid-beta.vercel.app',
+  'https://new-frontend-hetxz9vv9-abubakers-projects-f1e3718d.vercel.app',
   'http://localhost:3000'
 ];
 
@@ -21,6 +22,11 @@ app.use(cors({
   origin: function (origin, callback) {
     // السماح للطلبات بدون origin (مثل mobile apps)
     if (!origin) return callback(null, true);
+    
+    // السماح لأي رابط من Vercel
+    if (origin.includes('vercel.app') || origin.includes('netlify.app')) {
+      return callback(null, true);
+    }
     
     if (allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);
