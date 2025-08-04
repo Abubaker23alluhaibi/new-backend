@@ -14,12 +14,10 @@
    - API Secret
 
 ### الخطوة 2: إعداد متغيرات البيئة في Railway
-في لوحة تحكم Railway، أضف المتغيرات التالية:
+في لوحة تحكم Railway، أضف المتغير التالي:
 
 ```
-CLOUDINARY_CLOUD_NAME=your-cloud-name
-CLOUDINARY_API_KEY=your-api-key
-CLOUDINARY_API_SECRET=your-api-secret
+CLOUDINARY_URL=cloudinary://599629738223467:Ow4bBIt20vRFBBUk1IbKLguQC98@dfbfb5r7q
 ```
 
 ### الخطوة 3: اختبار الإعداد

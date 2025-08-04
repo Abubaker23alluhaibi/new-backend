@@ -47,11 +47,13 @@ const uploadDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
 
 // إعداد Cloudinary
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME || 'your-cloud-name',
-  api_key: process.env.CLOUDINARY_API_KEY || 'your-api-key',
-  api_secret: process.env.CLOUDINARY_API_SECRET || 'your-api-secret'
-});
+if (process.env.CLOUDINARY_URL) {
+  cloudinary.config({
+    cloud_name: 'dfbfb5r7q',
+    api_key: '599629738223467',
+    api_secret: 'Ow4bBIt20vRFBBUk1IbKLguQC98'
+  });
+}
 
 // إعداد multer لرفع الصور
 const storage = multer.diskStorage({
@@ -3199,7 +3201,7 @@ app.post('/upload-profile-image', upload.single('image'), async (req, res) => {
     let imageUrl;
     
     // محاولة رفع الصورة إلى Cloudinary أولاً
-    if (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_CLOUD_NAME !== 'your-cloud-name') {
+    if (process.env.CLOUDINARY_URL) {
       try {
         const result = await cloudinary.uploader.upload(req.file.path, {
           folder: 'tabibiq-profiles',
