@@ -632,10 +632,45 @@ app.get('/user-appointments/:userId', async (req, res) => {
 app.get('/doctor-appointments/:doctorId', async (req, res) => {
   try {
     const { doctorId } = req.params;
-    const appointments = await Appointment.find({ doctorId })
+    const doctorObjectId = new mongoose.Types.ObjectId(doctorId);
+    
+
+    
+    // جلب جميع المواعيد مع إزالة التكرار باستخدام distinct
+    const allAppointments = await Appointment.find({ doctorId: doctorObjectId })
       .sort({ date: 1, time: 1 })
-      .populate('userId', 'first_name phone');
-    res.json(appointments);
+      .populate('userId', 'first_name phone')
+      .lean(); // تحسين الأداء
+    
+
+    
+    // إزالة التكرار بناءً على مفتاح فريد يجمع بين التاريخ والوقت واسم المريض ونوع الموعد
+    const uniqueMap = new Map();
+    allAppointments.forEach(appointment => {
+      // استخدام مفتاح فريد يجمع بين التاريخ والوقت واسم المريض ونوع الموعد
+      const userName = appointment.userName || (appointment.userId ? appointment.userId.first_name : '') || '';
+      const key = `${appointment.date}_${appointment.time}_${userName}_${appointment.type || 'normal'}`;
+      
+      if (!uniqueMap.has(key)) {
+        uniqueMap.set(key, appointment);
+      } else {
+        // إذا كان هناك تكرار، احتفظ بالموعد الأحدث
+        const existing = uniqueMap.get(key);
+        if (appointment.createdAt && existing.createdAt) {
+          if (new Date(appointment.createdAt) > new Date(existing.createdAt)) {
+            uniqueMap.set(key, appointment);
+          }
+        }
+      }
+    });
+    
+    const uniqueAppointments = Array.from(uniqueMap.values());
+    
+    console.log(`🔍 مواعيد الطبيب ${doctorId}:`);
+    console.log(`   - المواعيد الأصلية: ${allAppointments.length}`);
+    console.log(`   - المواعيد بعد إزالة التكرار: ${uniqueAppointments.length}`);
+    
+    res.json(uniqueAppointments);
   } catch (err) {
     res.status(500).json({ error: 'حدث خطأ أثناء جلب مواعيد الطبيب' });
   }
@@ -1229,18 +1264,31 @@ app.get('/doctor-appointments/:doctorId', async (req, res) => {
     
 
     
-    // إزالة التكرار بناءً على المعرف الفريد
+    // إزالة التكرار بناءً على مفتاح فريد يجمع بين التاريخ والوقت واسم المريض ونوع الموعد
     const uniqueMap = new Map();
     allAppointments.forEach(appointment => {
-      const key = appointment._id.toString();
+      // استخدام مفتاح فريد يجمع بين التاريخ والوقت واسم المريض ونوع الموعد
+      const userName = appointment.userName || (appointment.userId ? appointment.userId.first_name : '') || '';
+      const key = `${appointment.date}_${appointment.time}_${userName}_${appointment.type || 'normal'}`;
+      
       if (!uniqueMap.has(key)) {
         uniqueMap.set(key, appointment);
+      } else {
+        // إذا كان هناك تكرار، احتفظ بالموعد الأحدث
+        const existing = uniqueMap.get(key);
+        if (appointment.createdAt && existing.createdAt) {
+          if (new Date(appointment.createdAt) > new Date(existing.createdAt)) {
+            uniqueMap.set(key, appointment);
+          }
+        }
       }
     });
     
     const uniqueAppointments = Array.from(uniqueMap.values());
     
-
+    console.log(`🔍 مواعيد الطبيب ${doctorId}:`);
+    console.log(`   - المواعيد الأصلية: ${allAppointments.length}`);
+    console.log(`   - المواعيد بعد إزالة التكرار: ${uniqueAppointments.length}`);
     
     res.json(uniqueAppointments);
   } catch (err) {
@@ -1261,6 +1309,37 @@ app.delete('/appointments/:id', async (req, res) => {
     res.json({ message: 'تم إلغاء الموعد بنجاح' });
   } catch (err) {
     res.status(500).json({ error: 'حدث خطأ أثناء إلغاء الموعد' });
+  }
+});
+
+// تحديث موعد
+app.put('/appointments/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updateData = req.body;
+    
+    const appointment = await Appointment.findByIdAndUpdate(
+      id, 
+      updateData, 
+      { new: true, runValidators: true }
+    );
+    
+    if (!appointment) {
+      return res.status(404).json({ error: 'الموعد غير موجود' });
+    }
+    
+    res.json({ 
+      success: true, 
+      message: 'تم تحديث الموعد بنجاح', 
+      appointment 
+    });
+  } catch (err) {
+    console.error('خطأ في تحديث الموعد:', err);
+    res.status(500).json({ 
+      success: false, 
+      error: 'حدث خطأ أثناء تحديث الموعد',
+      details: err.message 
+    });
   }
 });
 
@@ -3366,3 +3445,53 @@ app.put('/doctor/:id/appointment-duration', async (req, res) => {
     res.status(500).json({ error: 'حدث خطأ أثناء تحديث مدة الموعد' });
   }
 });
+
+// تنظيف المواعيد المكررة
+app.post('/clean-duplicate-appointments', async (req, res) => {
+  try {
+    console.log('🔧 بدء تنظيف المواعيد المكررة...');
+    
+    // جلب جميع المواعيد
+    const allAppointments = await Appointment.find({}).sort({ createdAt: 1 });
+    
+    // تجميع المواعيد المكررة
+    const duplicatesMap = new Map();
+    const duplicatesToDelete = [];
+    
+    allAppointments.forEach(appointment => {
+      const userName = appointment.userName || (appointment.userId ? appointment.userId.first_name : '') || '';
+      const key = `${appointment.doctorId}_${appointment.date}_${appointment.time}_${userName}_${appointment.type || 'normal'}`;
+      
+      if (duplicatesMap.has(key)) {
+        // هذا موعد مكرر، أضفه لقائمة الحذف
+        duplicatesToDelete.push(appointment._id);
+      } else {
+        duplicatesMap.set(key, appointment._id);
+      }
+    });
+    
+    console.log(`🔧 تم العثور على ${duplicatesToDelete.length} موعد مكرر`);
+    
+    // حذف المواعيد المكررة
+    if (duplicatesToDelete.length > 0) {
+      const deleteResult = await Appointment.deleteMany({ _id: { $in: duplicatesToDelete } });
+      console.log(`🔧 تم حذف ${deleteResult.deletedCount} موعد مكرر`);
+    }
+    
+    res.json({ 
+      success: true, 
+      duplicatesDeleted: duplicatesToDelete.length,
+      message: `تم تنظيف ${duplicatesToDelete.length} موعد مكرر بنجاح`
+    });
+    
+  } catch (err) {
+    console.error('❌ خطأ في تنظيف المواعيد المكررة:', err);
+    res.status(500).json({ 
+      success: false, 
+      error: 'حدث خطأ أثناء تنظيف المواعيد المكررة',
+      details: err.message 
+    });
+  }
+});
+
+// إضافة موعد خاص (special appointment)
