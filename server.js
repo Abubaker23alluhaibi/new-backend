@@ -166,7 +166,8 @@ const doctorSchema = new mongoose.Schema({
   is_featured: { type: Boolean, default: false },
   user_type: { type: String, default: 'doctor' }, // إضافة حقل user_type
   created_at: { type: Date, default: Date.now },
-  createdAt: { type: Date, default: Date.now }
+  createdAt: { type: Date, default: Date.now },
+  appointmentDuration: { type: Number, default: 30 }, // مدة الموعد الافتراضية بالدقائق
 });
 const Doctor = mongoose.model('Doctor', doctorSchema);
 
@@ -188,6 +189,7 @@ const appointmentSchema = new mongoose.Schema({
   notes: String,
   type: { type: String, enum: ['normal', 'special_appointment'], default: 'normal' }, // <-- أضف هذا السطر
   patientPhone: String, // <-- أضفت هذا السطر لحفظ رقم الهاتف
+  duration: { type: Number, default: 30 }, // مدة الموعد بالدقائق
   createdAt: { type: Date, default: Date.now }
 });
 const Appointment = mongoose.model('Appointment', appointmentSchema);
@@ -407,6 +409,7 @@ app.post('/register-doctor', upload.single('image'), async (req, res) => {
       about,
       workTimes: workTimes ? JSON.parse(workTimes) : [],
       experienceYears: req.body.experienceYears || 0,
+      appointmentDuration: req.body.appointmentDuration ? Number(req.body.appointmentDuration) : 30,
       user_type: 'doctor',
       status: 'pending' // في انتظار إرسال الوثائق
     });
@@ -1124,7 +1127,7 @@ app.get('/pending-doctors', async (req, res) => {
 // حجز موعد جديد
 app.post('/appointments', async (req, res) => {
   try {
-    const { userId, doctorId, userName, doctorName, date, time, reason } = req.body;
+    const { userId, doctorId, userName, doctorName, date, time, reason, duration } = req.body;
     if (!userId || !doctorId || !date || !time) {
       return res.status(400).json({ error: 'البيانات ناقصة' });
     }
@@ -1150,7 +1153,8 @@ app.post('/appointments', async (req, res) => {
       doctorName: formatDoctorName(doctorName), // إضافة "د." تلقائياً
       date,
       time,
-      reason
+      reason,
+      duration: duration ? Number(duration) : 30 // مدة الموعد بالدقائق
     });
     await appointment.save();
 
