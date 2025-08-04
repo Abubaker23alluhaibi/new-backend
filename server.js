@@ -3266,3 +3266,67 @@ app.post('/admin/toggle-account/:type/:id', async (req, res) => {
     res.status(500).json({ error: 'حدث خطأ أثناء تحديث حالة الحساب', details: err.message });
   }
 });
+
+// تحديث أوقات الدوام للطبيب
+app.put('/doctor/:id/work-times', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { workTimes } = req.body;
+
+    if (!workTimes || !Array.isArray(workTimes)) {
+      return res.status(400).json({ error: 'بيانات أوقات الدوام غير صحيحة' });
+    }
+
+    const doctor = await Doctor.findByIdAndUpdate(
+      id,
+      { workTimes },
+      { new: true }
+    );
+
+    if (!doctor) {
+      return res.status(404).json({ error: 'لم يتم العثور على الطبيب' });
+    }
+
+    res.json({ 
+      message: 'تم تحديث أوقات الدوام بنجاح',
+      workTimes: doctor.workTimes 
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'حدث خطأ أثناء تحديث أوقات الدوام' });
+  }
+});
+
+// تحديث مدة الموعد الافتراضية للطبيب
+app.put('/doctor/:id/appointment-duration', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { appointmentDuration } = req.body;
+
+    if (!appointmentDuration || typeof appointmentDuration !== 'number') {
+      return res.status(400).json({ error: 'مدة الموعد غير صحيحة' });
+    }
+
+    // التحقق من أن المدة ضمن القيم المسموحة
+    const allowedDurations = [5, 10, 15, 20, 30, 45, 60];
+    if (!allowedDurations.includes(appointmentDuration)) {
+      return res.status(400).json({ error: 'مدة الموعد غير مسموحة' });
+    }
+
+    const doctor = await Doctor.findByIdAndUpdate(
+      id,
+      { appointmentDuration },
+      { new: true }
+    );
+
+    if (!doctor) {
+      return res.status(404).json({ error: 'لم يتم العثور على الطبيب' });
+    }
+
+    res.json({ 
+      message: 'تم تحديث مدة الموعد الافتراضية بنجاح',
+      appointmentDuration: doctor.appointmentDuration 
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'حدث خطأ أثناء تحديث مدة الموعد' });
+  }
+});
