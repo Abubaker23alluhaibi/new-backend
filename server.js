@@ -46,21 +46,86 @@ app.use(express.json());
 const uploadDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
 
+// دالة لتنظيف الملفات المحلية القديمة
+const cleanupOldFiles = () => {
+  try {
+    if (fs.existsSync(uploadDir)) {
+      const files = fs.readdirSync(uploadDir);
+      const now = Date.now();
+      const oneDay = 24 * 60 * 60 * 1000; // يوم واحد بالميلي ثانية
+      
+      files.forEach(file => {
+        const filePath = path.join(uploadDir, file);
+        const stats = fs.statSync(filePath);
+        
+        // حذف الملفات الأقدم من يوم واحد
+        if (now - stats.mtime.getTime() > oneDay) {
+          fs.unlinkSync(filePath);
+          console.log(`🗑️ Deleted old file: ${file}`);
+        }
+      });
+    }
+  } catch (error) {
+    console.error('❌ Error cleaning up old files:', error);
+  }
+};
+
+// تنظيف الملفات كل ساعة
+setInterval(cleanupOldFiles, 60 * 60 * 1000);
+
+// تنظيف الملفات عند بدء التطبيق
+cleanupOldFiles();
+
 // إعداد Cloudinary
 if (process.env.CLOUDINARY_URL) {
-  cloudinary.config({
-    cloud_name: 'dfbfb5r7q',
-    api_key: '599629738223467',
-    api_secret: 'Ow4bBIt20vRFBBUk1IbKLguQC98'
-  });
+  try {
+    cloudinary.config({
+      cloud_name: process.env.CLOUDINARY_CLOUD_NAME || 'dfbfb5r7q',
+      api_key: process.env.CLOUDINARY_API_KEY || '599629738223467',
+      api_secret: process.env.CLOUDINARY_API_SECRET || 'Ow4bBIt20vRFBBUk1IbKLguQC98'
+    });
+    console.log('✅ Cloudinary configured successfully');
+  } catch (error) {
+    console.error('❌ Cloudinary configuration error:', error);
+  }
+} else {
+  console.log('⚠️ Cloudinary URL not found, using local storage');
 }
 
 // إعداد multer لرفع الصور
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadDir),
-  filename: (req, file, cb) => cb(null, Date.now() + '-' + file.originalname)
+  destination: (req, file, cb) => {
+    // التأكد من وجود المجلد
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    // إنشاء اسم فريد للملف
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    const extension = path.extname(file.originalname);
+    cb(null, `profile-${uniqueSuffix}${extension}`);
+  }
 });
-const upload = multer({ storage });
+
+const fileFilter = (req, file, cb) => {
+  // التحقق من نوع الملف
+  if (file.mimetype.startsWith('image/')) {
+    cb(null, true);
+  } else {
+    cb(new Error('يجب أن يكون الملف صورة'), false);
+  }
+};
+
+const upload = multer({ 
+  storage,
+  fileFilter,
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5MB
+    files: 1
+  }
+});
 
 // اتصال MongoDB
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/tabibiq';
@@ -3269,49 +3334,79 @@ app.post('/upload-profile-image', upload.single('image'), async (req, res) => {
 
     // التحقق من نوع الملف
     if (!req.file.mimetype.startsWith('image/')) {
+      // حذف الملف المحلي
+      if (fs.existsSync(req.file.path)) {
+        fs.unlinkSync(req.file.path);
+      }
       return res.status(400).json({ error: 'يجب أن يكون الملف صورة' });
     }
 
     // التحقق من حجم الملف (أقل من 5MB)
     if (req.file.size > 5 * 1024 * 1024) {
+      // حذف الملف المحلي
+      if (fs.existsSync(req.file.path)) {
+        fs.unlinkSync(req.file.path);
+      }
       return res.status(400).json({ error: 'حجم الصورة يجب أن يكون أقل من 5 ميجابايت' });
     }
 
     let imageUrl;
+    let uploadSuccess = false;
     
     // محاولة رفع الصورة إلى Cloudinary أولاً
     if (process.env.CLOUDINARY_URL) {
       try {
+        console.log('🔄 Attempting to upload to Cloudinary...');
         const result = await cloudinary.uploader.upload(req.file.path, {
           folder: 'tabibiq-profiles',
           transformation: [
             { width: 400, height: 400, crop: 'fill', gravity: 'face' },
             { quality: 'auto', fetch_format: 'auto' }
-          ]
+          ],
+          resource_type: 'image'
         });
         imageUrl = result.secure_url;
+        uploadSuccess = true;
+        console.log('✅ Image uploaded to Cloudinary successfully:', imageUrl);
         
         // حذف الملف المحلي بعد رفعه إلى Cloudinary
-        fs.unlinkSync(req.file.path);
+        if (fs.existsSync(req.file.path)) {
+          fs.unlinkSync(req.file.path);
+          console.log('🗑️ Local file deleted after Cloudinary upload');
+        }
       } catch (cloudinaryError) {
-        console.error('خطأ في رفع الصورة إلى Cloudinary:', cloudinaryError);
+        console.error('❌ Cloudinary upload failed:', cloudinaryError);
         // إذا فشل Cloudinary، استخدم التخزين المحلي
         const baseUrl = process.env.API_URL || `${req.protocol}://${req.get('host')}`;
         imageUrl = `${baseUrl}/uploads/${req.file.filename}`;
+        console.log('📁 Using local storage as fallback:', imageUrl);
       }
     } else {
       // استخدام التخزين المحلي إذا لم يتم إعداد Cloudinary
       const baseUrl = process.env.API_URL || `${req.protocol}://${req.get('host')}`;
       imageUrl = `${baseUrl}/uploads/${req.file.filename}`;
+      console.log('📁 Using local storage:', imageUrl);
     }
     
     res.json({ 
       success: true, 
       imageUrl,
+      uploadSuccess,
       message: 'تم رفع الصورة بنجاح' 
     });
   } catch (err) {
-    console.error('خطأ في رفع الصورة:', err);
+    console.error('❌ Error in image upload:', err);
+    
+    // حذف الملف المحلي في حالة الخطأ
+    if (req.file && fs.existsSync(req.file.path)) {
+      try {
+        fs.unlinkSync(req.file.path);
+        console.log('🗑️ Local file deleted due to error');
+      } catch (deleteError) {
+        console.error('❌ Error deleting local file:', deleteError);
+      }
+    }
+    
     res.status(500).json({ error: 'حدث خطأ أثناء رفع الصورة' });
   }
 });
@@ -3322,9 +3417,89 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 // إضافة CORS للصور
 app.use('/uploads', (req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET');
-  res.header('Access-Control-Allow-Headers', 'Content-Type');
+  res.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.header('Cache-Control', 'public, max-age=31536000'); // كاش لمدة سنة
+  res.header('Expires', new Date(Date.now() + 31536000000).toUTCString());
+  
+  // معالجة preflight requests
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+  
   next();
+});
+
+// اختبار Cloudinary
+app.get('/test-cloudinary', async (req, res) => {
+  try {
+    console.log('🔍 Testing Cloudinary configuration...');
+    console.log('CLOUDINARY_URL:', process.env.CLOUDINARY_URL ? 'Set' : 'Not set');
+    console.log('CLOUDINARY_CLOUD_NAME:', process.env.CLOUDINARY_CLOUD_NAME);
+    console.log('CLOUDINARY_API_KEY:', process.env.CLOUDINARY_API_KEY ? 'Set' : 'Not set');
+    
+    if (!process.env.CLOUDINARY_URL) {
+      return res.json({ 
+        status: 'warning', 
+        message: 'Cloudinary غير مُعد',
+        cloudinaryConfigured: false,
+        env: {
+          CLOUDINARY_URL: 'Not set',
+          CLOUDINARY_CLOUD_NAME: process.env.CLOUDINARY_CLOUD_NAME,
+          CLOUDINARY_API_KEY: process.env.CLOUDINARY_API_KEY ? 'Set' : 'Not set'
+        }
+      });
+    }
+
+    // اختبار الاتصال بـ Cloudinary
+    console.log('🔄 Attempting to ping Cloudinary...');
+    const result = await cloudinary.api.ping();
+    console.log('✅ Cloudinary ping successful:', result);
+    
+    res.json({ 
+      status: 'success', 
+      message: 'Cloudinary يعمل بشكل صحيح',
+      cloudinaryConfigured: true,
+      ping: result,
+      env: {
+        CLOUDINARY_URL: 'Set',
+        CLOUDINARY_CLOUD_NAME: process.env.CLOUDINARY_CLOUD_NAME,
+        CLOUDINARY_API_KEY: process.env.CLOUDINARY_API_KEY ? 'Set' : 'Not set'
+      }
+    });
+  } catch (error) {
+    console.error('❌ Cloudinary test failed:', error);
+    res.json({ 
+      status: 'error', 
+      message: 'خطأ في الاتصال بـ Cloudinary',
+      cloudinaryConfigured: false,
+      error: error.message,
+      env: {
+        CLOUDINARY_URL: process.env.CLOUDINARY_URL ? 'Set' : 'Not set',
+        CLOUDINARY_CLOUD_NAME: process.env.CLOUDINARY_CLOUD_NAME,
+        CLOUDINARY_API_KEY: process.env.CLOUDINARY_API_KEY ? 'Set' : 'Not set'
+      }
+    });
+  }
+});
+
+// اختبار بديل للصور
+app.get('/test-image-upload', (req, res) => {
+  res.json({
+    status: 'info',
+    message: 'نظام رفع الصور جاهز للاختبار',
+    endpoints: {
+      upload: 'POST /upload-profile-image',
+      test: 'GET /test-cloudinary',
+      health: 'GET /api/health'
+    },
+    config: {
+      uploadDir: uploadDir,
+      maxFileSize: '5MB',
+      allowedTypes: 'image/*',
+      cloudinaryConfigured: !!process.env.CLOUDINARY_URL
+    }
+  });
 });
 
 // جلب صورة الدكتور
@@ -3353,9 +3528,34 @@ app.get('/doctor-image/:doctorId', async (req, res) => {
   }
 });
 
+// Middleware لتسجيل الطلبات
 app.use((req, res, next) => {
   console.log('📥 طلب جديد:', req.method, req.url);
   next();
+});
+
+// endpoint للتحقق من حالة الخادم
+app.get('/server-status', (req, res) => {
+  res.json({
+    status: 'running',
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development',
+    cloudinary: {
+      configured: !!process.env.CLOUDINARY_URL,
+      cloudName: process.env.CLOUDINARY_CLOUD_NAME,
+      apiKey: process.env.CLOUDINARY_API_KEY ? 'Set' : 'Not set'
+    },
+    upload: {
+      directory: uploadDir,
+      exists: fs.existsSync(uploadDir)
+    },
+    endpoints: {
+      health: '/api/health',
+      testCloudinary: '/test-cloudinary',
+      testImageUpload: '/test-image-upload',
+      uploadProfileImage: '/upload-profile-image'
+    }
+  });
 });
 
 // Endpoint لتعطيل أو تفعيل حساب مستخدم أو دكتور
