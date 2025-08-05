@@ -3723,7 +3723,72 @@ app.post('/migrate-single-image', async (req, res) => {
     
     const localPath = path.join(__dirname, imagePath);
     if (!fs.existsSync(localPath)) {
-      return res.status(404).json({ error: 'الملف غير موجود على الخادم' });
+      console.log(`❌ الملف غير موجود على الخادم: ${localPath}`);
+      
+      // إذا كان الملف غير موجود، حاول البحث عن نسخة بديلة
+      const fileName = path.basename(imagePath);
+      const uploadsDir = path.join(__dirname, 'uploads');
+      
+      if (fs.existsSync(uploadsDir)) {
+        const files = fs.readdirSync(uploadsDir);
+        const similarFile = files.find(file => file.includes(fileName.split('-')[0]));
+        
+        if (similarFile) {
+          console.log(`🔄 تم العثور على ملف مشابه: ${similarFile}`);
+          const alternativePath = path.join(uploadsDir, similarFile);
+          const alternativeImagePath = `/uploads/${similarFile}`;
+          
+          // تحديث مسار الصورة في قاعدة البيانات
+          if (userType === 'doctor') {
+            const doctor = await Doctor.findById(userId);
+            if (doctor) {
+              if (doctor.image === imagePath) {
+                doctor.image = alternativeImagePath;
+              } else if (doctor.profileImage === imagePath) {
+                doctor.profileImage = alternativeImagePath;
+              }
+              await doctor.save();
+            }
+          } else if (userType === 'user') {
+            const user = await User.findById(userId);
+            if (user) {
+              if (user.image === imagePath) {
+                user.image = alternativeImagePath;
+              } else if (user.profileImage === imagePath) {
+                user.profileImage = alternativeImagePath;
+              }
+              await user.save();
+            }
+          }
+          
+          // استخدام الملف البديل
+          const result = await cloudinary.uploader.upload(alternativePath, {
+            folder: 'tabibiq-profiles',
+            transformation: [
+              { width: 400, height: 400, crop: 'fill', gravity: 'face' },
+              { quality: 'auto', fetch_format: 'auto' }
+            ]
+          });
+          
+          const cloudinaryUrl = result.secure_url;
+          console.log(`✅ تم تحويل الملف البديل إلى Cloudinary: ${cloudinaryUrl}`);
+          
+          res.json({
+            success: true,
+            message: 'تم تحويل الصورة البديلة إلى Cloudinary بنجاح',
+            cloudinaryUrl,
+            updatedRecord: {
+              id: userId,
+              originalPath: imagePath,
+              alternativePath: alternativeImagePath,
+              cloudinaryUrl: cloudinaryUrl
+            }
+          });
+          return;
+        }
+      }
+      
+      return res.status(404).json({ error: 'الملف غير موجود على الخادم ولا توجد نسخة بديلة' });
     }
 
     // رفع الصورة إلى Cloudinary
