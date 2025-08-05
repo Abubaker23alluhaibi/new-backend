@@ -3513,18 +3513,331 @@ app.get('/doctor-image/:doctorId', async (req, res) => {
     }
     
     // إرجاع الصورة المتاحة (image أو profileImage)
-    const imageUrl = doctor.image || doctor.profileImage;
+    let imageUrl = doctor.image || doctor.profileImage;
     
     if (!imageUrl) {
       return res.status(404).json({ error: 'لا توجد صورة للطبيب' });
     }
     
+    // إذا كانت الصورة محلية وCloudinary مُعد، حاول تحويلها تلقائياً
+    if (imageUrl.startsWith('/uploads/') && process.env.CLOUDINARY_URL) {
+      try {
+        const localPath = path.join(__dirname, imageUrl);
+        if (fs.existsSync(localPath)) {
+          console.log(`🔄 تحويل تلقائي للصورة المحلية: ${imageUrl}`);
+          
+          const result = await cloudinary.uploader.upload(localPath, {
+            folder: 'tabibiq-profiles',
+            transformation: [
+              { width: 400, height: 400, crop: 'fill', gravity: 'face' },
+              { quality: 'auto', fetch_format: 'auto' }
+            ]
+          });
+          
+          // تحديث قاعدة البيانات
+          if (doctor.image === imageUrl) {
+            doctor.image = result.secure_url;
+          } else if (doctor.profileImage === imageUrl) {
+            doctor.profileImage = result.secure_url;
+          }
+          await doctor.save();
+          
+          imageUrl = result.secure_url;
+          console.log(`✅ تم تحويل الصورة تلقائياً إلى Cloudinary: ${imageUrl}`);
+        }
+      } catch (error) {
+        console.error(`❌ خطأ في التحويل التلقائي للصورة: ${error.message}`);
+        // إذا فشل التحويل، استخدم الرابط المحلي
+        imageUrl = `${req.protocol}://${req.get('host')}${imageUrl}`;
+      }
+    } else if (imageUrl.startsWith('/uploads/')) {
+      // إذا كانت محلية وCloudinary غير مُعد
+      imageUrl = `${req.protocol}://${req.get('host')}${imageUrl}`;
+    }
+    
     res.json({ 
-      imageUrl: imageUrl.startsWith('http') ? imageUrl : `${req.protocol}://${req.get('host')}${imageUrl}`,
+      imageUrl,
       hasImage: true 
     });
   } catch (err) {
     res.status(500).json({ error: 'خطأ في جلب صورة الطبيب' });
+  }
+});
+
+// تحويل الصور المحلية إلى Cloudinary تلقائياً
+app.post('/migrate-local-images', async (req, res) => {
+  try {
+    if (!process.env.CLOUDINARY_URL) {
+      return res.status(400).json({ error: 'Cloudinary غير مُعد' });
+    }
+
+    console.log('🔄 بدء تحويل الصور المحلية إلى Cloudinary...');
+    
+    // جلب جميع الأطباء والمستخدمين الذين لديهم صور محلية
+    const doctors = await Doctor.find({
+      $or: [
+        { image: { $regex: '^/uploads/', $options: 'i' } },
+        { profileImage: { $regex: '^/uploads/', $options: 'i' } }
+      ]
+    });
+    
+    const users = await User.find({
+      $or: [
+        { image: { $regex: '^/uploads/', $options: 'i' } },
+        { profileImage: { $regex: '^/uploads/', $options: 'i' } }
+      ]
+    });
+
+    const results = {
+      doctors: { total: doctors.length, migrated: 0, failed: 0 },
+      users: { total: users.length, migrated: 0, failed: 0 },
+      errors: []
+    };
+
+    // تحويل صور الأطباء
+    for (const doctor of doctors) {
+      try {
+        let updated = false;
+        
+        // تحويل حقل image
+        if (doctor.image && doctor.image.startsWith('/uploads/')) {
+          const localPath = path.join(__dirname, doctor.image);
+          if (fs.existsSync(localPath)) {
+            const result = await cloudinary.uploader.upload(localPath, {
+              folder: 'tabibiq-profiles',
+              transformation: [
+                { width: 400, height: 400, crop: 'fill', gravity: 'face' },
+                { quality: 'auto', fetch_format: 'auto' }
+              ]
+            });
+            doctor.image = result.secure_url;
+            updated = true;
+            console.log(`✅ تم تحويل صورة الطبيب ${doctor.name} (image): ${result.secure_url}`);
+          }
+        }
+        
+        // تحويل حقل profileImage
+        if (doctor.profileImage && doctor.profileImage.startsWith('/uploads/')) {
+          const localPath = path.join(__dirname, doctor.profileImage);
+          if (fs.existsSync(localPath)) {
+            const result = await cloudinary.uploader.upload(localPath, {
+              folder: 'tabibiq-profiles',
+              transformation: [
+                { width: 400, height: 400, crop: 'fill', gravity: 'face' },
+                { quality: 'auto', fetch_format: 'auto' }
+              ]
+            });
+            doctor.profileImage = result.secure_url;
+            updated = true;
+            console.log(`✅ تم تحويل صورة الطبيب ${doctor.name} (profileImage): ${result.secure_url}`);
+          }
+        }
+        
+        if (updated) {
+          await doctor.save();
+          results.doctors.migrated++;
+        }
+      } catch (error) {
+        console.error(`❌ خطأ في تحويل صورة الطبيب ${doctor.name}:`, error);
+        results.doctors.failed++;
+        results.errors.push(`Doctor ${doctor.name}: ${error.message}`);
+      }
+    }
+
+    // تحويل صور المستخدمين
+    for (const user of users) {
+      try {
+        let updated = false;
+        
+        // تحويل حقل image
+        if (user.image && user.image.startsWith('/uploads/')) {
+          const localPath = path.join(__dirname, user.image);
+          if (fs.existsSync(localPath)) {
+            const result = await cloudinary.uploader.upload(localPath, {
+              folder: 'tabibiq-profiles',
+              transformation: [
+                { width: 400, height: 400, crop: 'fill', gravity: 'face' },
+                { quality: 'auto', fetch_format: 'auto' }
+              ]
+            });
+            user.image = result.secure_url;
+            updated = true;
+            console.log(`✅ تم تحويل صورة المستخدم ${user.first_name} (image): ${result.secure_url}`);
+          }
+        }
+        
+        // تحويل حقل profileImage
+        if (user.profileImage && user.profileImage.startsWith('/uploads/')) {
+          const localPath = path.join(__dirname, user.profileImage);
+          if (fs.existsSync(localPath)) {
+            const result = await cloudinary.uploader.upload(localPath, {
+              folder: 'tabibiq-profiles',
+              transformation: [
+                { width: 400, height: 400, crop: 'fill', gravity: 'face' },
+                { quality: 'auto', fetch_format: 'auto' }
+              ]
+            });
+            user.profileImage = result.secure_url;
+            updated = true;
+            console.log(`✅ تم تحويل صورة المستخدم ${user.first_name} (profileImage): ${result.secure_url}`);
+          }
+        }
+        
+        if (updated) {
+          await user.save();
+          results.users.migrated++;
+        }
+      } catch (error) {
+        console.error(`❌ خطأ في تحويل صورة المستخدم ${user.first_name}:`, error);
+        results.users.failed++;
+        results.errors.push(`User ${user.first_name}: ${error.message}`);
+      }
+    }
+
+    console.log('✅ انتهى تحويل الصور المحلية إلى Cloudinary');
+    res.json({
+      success: true,
+      message: 'تم تحويل الصور المحلية إلى Cloudinary بنجاح',
+      results
+    });
+  } catch (err) {
+    console.error('❌ خطأ في تحويل الصور المحلية:', err);
+    res.status(500).json({ error: 'حدث خطأ أثناء تحويل الصور المحلية' });
+  }
+});
+
+// تحويل صورة واحدة محددة إلى Cloudinary
+app.post('/migrate-single-image', async (req, res) => {
+  try {
+    const { imagePath, userId, userType } = req.body; // userType: 'doctor' or 'user'
+    
+    if (!process.env.CLOUDINARY_URL) {
+      return res.status(400).json({ error: 'Cloudinary غير مُعد' });
+    }
+
+    if (!imagePath || !imagePath.startsWith('/uploads/')) {
+      return res.status(400).json({ error: 'مسار الصورة غير صحيح' });
+    }
+
+    console.log(`🔄 بدء تحويل الصورة: ${imagePath}`);
+    
+    const localPath = path.join(__dirname, imagePath);
+    if (!fs.existsSync(localPath)) {
+      return res.status(404).json({ error: 'الملف غير موجود على الخادم' });
+    }
+
+    // رفع الصورة إلى Cloudinary
+    const result = await cloudinary.uploader.upload(localPath, {
+      folder: 'tabibiq-profiles',
+      transformation: [
+        { width: 400, height: 400, crop: 'fill', gravity: 'face' },
+        { quality: 'auto', fetch_format: 'auto' }
+      ]
+    });
+
+    const cloudinaryUrl = result.secure_url;
+    console.log(`✅ تم رفع الصورة إلى Cloudinary: ${cloudinaryUrl}`);
+
+    // تحديث قاعدة البيانات
+    let updatedRecord = null;
+    if (userType === 'doctor') {
+      const doctor = await Doctor.findById(userId);
+      if (doctor) {
+        if (doctor.image === imagePath) {
+          doctor.image = cloudinaryUrl;
+        } else if (doctor.profileImage === imagePath) {
+          doctor.profileImage = cloudinaryUrl;
+        }
+        await doctor.save();
+        updatedRecord = doctor;
+      }
+    } else if (userType === 'user') {
+      const user = await User.findById(userId);
+      if (user) {
+        if (user.image === imagePath) {
+          user.image = cloudinaryUrl;
+        } else if (user.profileImage === imagePath) {
+          user.profileImage = cloudinaryUrl;
+        }
+        await user.save();
+        updatedRecord = user;
+      }
+    }
+
+    res.json({
+      success: true,
+      message: 'تم تحويل الصورة إلى Cloudinary بنجاح',
+      cloudinaryUrl,
+      updatedRecord: updatedRecord ? {
+        id: updatedRecord._id,
+        name: updatedRecord.name || updatedRecord.first_name
+      } : null
+    });
+  } catch (err) {
+    console.error('❌ خطأ في تحويل الصورة المفردة:', err);
+    res.status(500).json({ error: 'حدث خطأ أثناء تحويل الصورة' });
+  }
+});
+
+// جلب صورة المستخدم
+app.get('/user-image/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const user = await User.findById(userId).select('image profileImage');
+    
+    if (!user) {
+      return res.status(404).json({ error: 'المستخدم غير موجود' });
+    }
+    
+    // إرجاع الصورة المتاحة (image أو profileImage)
+    let imageUrl = user.image || user.profileImage;
+    
+    if (!imageUrl) {
+      return res.status(404).json({ error: 'لا توجد صورة للمستخدم' });
+    }
+    
+    // إذا كانت الصورة محلية وCloudinary مُعد، حاول تحويلها تلقائياً
+    if (imageUrl.startsWith('/uploads/') && process.env.CLOUDINARY_URL) {
+      try {
+        const localPath = path.join(__dirname, imageUrl);
+        if (fs.existsSync(localPath)) {
+          console.log(`🔄 تحويل تلقائي للصورة المحلية: ${imageUrl}`);
+          
+          const result = await cloudinary.uploader.upload(localPath, {
+            folder: 'tabibiq-profiles',
+            transformation: [
+              { width: 400, height: 400, crop: 'fill', gravity: 'face' },
+              { quality: 'auto', fetch_format: 'auto' }
+            ]
+          });
+          
+          // تحديث قاعدة البيانات
+          if (user.image === imageUrl) {
+            user.image = result.secure_url;
+          } else if (user.profileImage === imageUrl) {
+            user.profileImage = result.secure_url;
+          }
+          await user.save();
+          
+          imageUrl = result.secure_url;
+          console.log(`✅ تم تحويل الصورة تلقائياً إلى Cloudinary: ${imageUrl}`);
+        }
+      } catch (error) {
+        console.error(`❌ خطأ في التحويل التلقائي للصورة: ${error.message}`);
+        // إذا فشل التحويل، استخدم الرابط المحلي
+        imageUrl = `${req.protocol}://${req.get('host')}${imageUrl}`;
+      }
+    } else if (imageUrl.startsWith('/uploads/')) {
+      // إذا كانت محلية وCloudinary غير مُعد
+      imageUrl = `${req.protocol}://${req.get('host')}${imageUrl}`;
+    }
+    
+    res.json({ 
+      imageUrl,
+      hasImage: true 
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'خطأ في جلب صورة المستخدم' });
   }
 });
 
