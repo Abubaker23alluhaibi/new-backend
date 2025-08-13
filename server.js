@@ -16,6 +16,7 @@ const allowedOrigins = [
   'https://tabib-iq-frontend.vercel.app',
   'https://new-frontend-livid-beta.vercel.app',
   'https://new-frontend-hetxz9vv9-abubakers-projects-f1e3718d.vercel.app',
+  'https://new-frontend-a1pslmpwn-abubakers-projects-f1e3718d.vercel.app',
   'http://localhost:3000'
 ];
 
@@ -420,22 +421,45 @@ function formatDoctorName(name) {
 // تسجيل مستخدم جديد
 app.post('/register', async (req, res) => {
   try {
+    console.log('📝 Register request body:', req.body);
     const { email, password, first_name, phone } = req.body;
+    
+    // التحقق من وجود جميع الحقول المطلوبة
+    if (!email || !password || !first_name || !phone) {
+      console.log('❌ Missing required fields:', { email: !!email, password: !!password, first_name: !!first_name, phone: !!phone });
+      return res.status(400).json({ error: 'جميع الحقول مطلوبة' });
+    }
+    
     // توحيد رقم الهاتف
     const normPhone = normalizePhone(phone);
+    console.log('📱 Normalized phone:', normPhone);
+    
     // تحقق من وجود الإيميل في User أو Doctor (case-insensitive)
     const existingUser = await User.findOne({ email: { $regex: new RegExp(`^${email}$`, 'i') } });
     const existingDoctor = await Doctor.findOne({ email: { $regex: new RegExp(`^${email}$`, 'i') } });
-    if (existingUser || existingDoctor) return res.status(400).json({ error: 'البريد الإلكتروني مستخدم مسبقًا' });
+    
+    if (existingUser || existingDoctor) {
+      console.log('❌ Email already exists:', email);
+      return res.status(400).json({ error: 'البريد الإلكتروني مستخدم مسبقًا' });
+    }
+    
     // تحقق من وجود رقم الهاتف في User أو Doctor
     const phoneUser = await User.findOne({ phone: normPhone });
     const phoneDoctor = await Doctor.findOne({ phone: normPhone });
-    if (phoneUser || phoneDoctor) return res.status(400).json({ error: 'رقم الهاتف مستخدم مسبقًا' });
+    
+    if (phoneUser || phoneDoctor) {
+      console.log('❌ Phone already exists:', normPhone);
+      return res.status(400).json({ error: 'رقم الهاتف مستخدم مسبقًا' });
+    }
+    
     const hashed = await bcrypt.hash(password, 10);
     const user = new User({ email, password: hashed, first_name, phone: normPhone });
     await user.save();
+    
+    console.log('✅ User created successfully:', { email, first_name, phone: normPhone });
     res.json({ message: 'تم إنشاء الحساب بنجاح!' });
   } catch (err) {
+    console.error('❌ Register error:', err);
     res.status(500).json({ error: 'حدث خطأ أثناء إنشاء الحساب' });
   }
 });
@@ -533,12 +557,21 @@ ${doctorInfo}
 // تسجيل الدخول (حسب نوع الحساب)
 app.post('/login', async (req, res) => {
   try {
+    console.log('🔐 Login request body:', req.body);
     let { email, password, loginType } = req.body;
+    
+    // التحقق من وجود جميع الحقول المطلوبة
+    if (!email || !password || !loginType) {
+      console.log('❌ Missing required fields:', { email: !!email, password: !!password, loginType: !!loginType });
+      return res.status(400).json({ error: 'جميع الحقول مطلوبة' });
+    }
+    
     // إذا كان input لا يحتوي @ اعتبره رقم هاتف
     let isPhone = false;
     if (email && !email.includes('@')) {
       isPhone = true;
       email = normalizePhone(email);
+      console.log('📱 Normalized phone for login:', email);
     }
     // تحقق من بيانات الأدمن من قاعدة البيانات
     if (loginType === 'admin' || (email && email.includes('admin')) || (email && email.includes('tabibIQ'))) {
@@ -617,6 +650,7 @@ app.post('/login', async (req, res) => {
       return res.status(400).json({ error: 'بيانات الدخول غير صحيحة' });
     }
   } catch (err) {
+    console.error('❌ Login error:', err);
     res.status(500).json({ error: 'حدث خطأ أثناء تسجيل الدخول' });
   }
 });
