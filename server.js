@@ -233,6 +233,7 @@ const doctorSchema = new mongoose.Schema({
   syndicateBack: String,
   about: String,
   workTimes: Array,
+  vacationDays: Array, // أيام الإجازات والأيام غير المتاحة
   experienceYears: { type: Number, default: 0 },
   centerId: { type: mongoose.Schema.Types.ObjectId, ref: 'HealthCenter' }, // ربط بالمركز
   isIndependent: { type: Boolean, default: true }, // هل يعمل بشكل مستقل
@@ -1276,7 +1277,17 @@ app.post('/appointments', async (req, res) => {
       return res.status(400).json({ error: 'البيانات ناقصة' });
     }
     
-
+    // جلب معلومات الطبيب للتحقق من أيام الإجازات
+    const doctor = await Doctor.findById(doctorId);
+    if (!doctor) {
+      return res.status(404).json({ error: 'الطبيب غير موجود' });
+    }
+    
+    // التحقق من أن التاريخ ليس يوم إجازة
+    const dateObj = new Date(date);
+    if (isVacationDay(dateObj, doctor.vacationDays)) {
+      return res.status(400).json({ error: 'لا يمكن الحجز في هذا اليوم لأنه يوم إجازة للطبيب' });
+    }
     
     // التحقق من وجود موعد مكرر قبل الإنشاء
     const existingAppointment = await Appointment.findOne({
@@ -1325,6 +1336,19 @@ app.post('/appointments', async (req, res) => {
 app.get('/appointments/:doctorId/:date', async (req, res) => {
   try {
     const { doctorId, date } = req.params;
+    
+    // جلب معلومات الطبيب للتحقق من أيام الإجازات
+    const doctor = await Doctor.findById(doctorId);
+    if (!doctor) {
+      return res.status(404).json({ error: 'الطبيب غير موجود' });
+    }
+    
+    // التحقق من أن التاريخ ليس يوم إجازة
+    const dateObj = new Date(date);
+    if (isVacationDay(dateObj, doctor.vacationDays)) {
+      return res.json([]); // إرجاع قائمة فارغة لأن اليوم هو يوم إجازة
+    }
+    
     const appointments = await Appointment.find({
       doctorId: doctorId,
       date: date
@@ -4020,6 +4044,79 @@ app.put('/doctor/:id/work-times', async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ error: 'حدث خطأ أثناء تحديث أوقات الدوام' });
+  }
+});
+
+// دالة مساعدة للتحقق من أيام الإجازات
+const isVacationDay = (date, vacationDays) => {
+  if (!vacationDays || !Array.isArray(vacationDays)) {
+    return false;
+  }
+  
+  const year = date.getFullYear();
+  const month = date.getMonth() + 1; // 1-12
+  const day = date.getDate();
+  
+  for (const vacation of vacationDays) {
+    // التحقق من الإجازة السنوية
+    if (vacation.type === 'yearly' && vacation.year === year) {
+      return true;
+    }
+    
+    // التحقق من الإجازة الشهرية
+    if (vacation.type === 'monthly' && vacation.year === year && vacation.month == month) {
+      return true;
+    }
+    
+    // التحقق من الإجازة اليومية
+    if (vacation.type === 'single' && vacation.year === year) {
+      const vacationDate = new Date(vacation.date);
+      if (vacationDate.getMonth() + 1 === month && vacationDate.getDate() === day) {
+        return true;
+      }
+    }
+  }
+  
+  return false;
+};
+
+// تحديث جدول العمل والإجازات للطبيب
+app.put('/doctor/:id/work-schedule', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { workTimes, vacationDays } = req.body;
+
+    if (!workTimes || !Array.isArray(workTimes)) {
+      return res.status(400).json({ error: 'بيانات أوقات الدوام غير صحيحة' });
+    }
+
+    if (!vacationDays || !Array.isArray(vacationDays)) {
+      return res.status(400).json({ error: 'بيانات أيام الإجازات غير صحيحة' });
+    }
+
+    const doctor = await Doctor.findByIdAndUpdate(
+      id,
+      { workTimes, vacationDays },
+      { new: true }
+    );
+
+    if (!doctor) {
+      return res.status(404).json({ error: 'لم يتم العثور على الطبيب' });
+    }
+
+    console.log(`✅ تم تحديث جدول العمل والإجازات للطبيب ${id}:`, {
+      workTimes: doctor.workTimes.length,
+      vacationDays: doctor.vacationDays.length
+    });
+
+    res.json({ 
+      message: 'تم تحديث جدول العمل والإجازات بنجاح',
+      workTimes: doctor.workTimes,
+      vacationDays: doctor.vacationDays
+    });
+  } catch (err) {
+    console.error('❌ خطأ في تحديث جدول العمل والإجازات:', err);
+    res.status(500).json({ error: 'حدث خطأ أثناء تحديث جدول العمل والإجازات' });
   }
 });
 
