@@ -4058,21 +4058,25 @@ const isVacationDay = (date, vacationDays) => {
   const day = date.getDate();
   
   for (const vacation of vacationDays) {
-    // التحقق من الإجازة السنوية
-    if (vacation.type === 'yearly' && vacation.year === year) {
-      return true;
-    }
-    
-    // التحقق من الإجازة الشهرية
-    if (vacation.type === 'monthly' && vacation.year === year && vacation.month == month) {
-      return true;
-    }
-    
-    // التحقق من الإجازة اليومية
-    if (vacation.type === 'single' && vacation.year === year) {
-      const vacationDate = new Date(vacation.date);
-      if (vacationDate.getMonth() + 1 === month && vacationDate.getDate() === day) {
-        return true;
+    // التحقق من الإجازة اليومية (التاريخ كاملاً)
+    if (vacation) {
+      let vacationDate;
+      
+      // التعامل مع البيانات القديمة والجديدة
+      if (typeof vacation === 'string') {
+        // البيانات الجديدة - تاريخ كسلسلة نصية
+        vacationDate = new Date(vacation);
+      } else if (vacation && typeof vacation === 'object' && vacation.date) {
+        // البيانات القديمة - كائن مع حقل date
+        vacationDate = new Date(vacation.date);
+      }
+      
+      if (vacationDate && !isNaN(vacationDate.getTime())) {
+        if (vacationDate.getFullYear() === year && 
+            vacationDate.getMonth() + 1 === month && 
+            vacationDate.getDate() === day) {
+          return true;
+        }
       }
     }
   }
