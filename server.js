@@ -267,6 +267,8 @@ const appointmentSchema = new mongoose.Schema({
   type: { type: String, enum: ['normal', 'special_appointment'], default: 'normal' }, // <-- أضف هذا السطر
   patientPhone: String, // <-- أضفت هذا السطر لحفظ رقم الهاتف
   duration: { type: Number, default: 30 }, // مدة الموعد بالدقائق
+  attendance: { type: String, enum: ['present', 'absent'], default: 'absent' }, // حالة الحضور - فقط حاضر أو غائب
+  attendanceTime: Date, // وقت تسجيل الحضور
   createdAt: { type: Date, default: Date.now }
 });
 const Appointment = mongoose.model('Appointment', appointmentSchema);
@@ -2294,6 +2296,35 @@ app.get('/doctor-analytics/:doctorId', async (req, res) => {
     const totalAppointments = appointments.length;
     const uniquePatients = [...new Set(appointments.map(a => a.userId.toString()))].length;
 
+    // إحصائيات الحضور والغياب
+    const attendanceStats = await Appointment.aggregate([
+      { $match: { doctorId: new mongoose.Types.ObjectId(doctorId) } },
+      {
+        $group: {
+          _id: '$attendance',
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    // تحويل النتائج إلى كائن
+    const attendanceData = {};
+    attendanceStats.forEach(stat => {
+      attendanceData[stat._id] = stat.count;
+    });
+
+    // حساب النسب المئوية
+    const presentCount = attendanceData.present || 0;
+    const absentCount = attendanceData.absent || 0;
+    const pendingCount = attendanceData.pending || 0;
+    const totalWithAttendance = presentCount + absentCount + pendingCount;
+    
+    const attendancePercentages = {
+      present: totalWithAttendance > 0 ? ((presentCount / totalWithAttendance) * 100).toFixed(1) : 0,
+      absent: totalWithAttendance > 0 ? ((absentCount / totalWithAttendance) * 100).toFixed(1) : 0,
+      pending: totalWithAttendance > 0 ? ((pendingCount / totalWithAttendance) * 100).toFixed(1) : 0
+    };
+
     // المواعيد الشهرية (آخر 12 شهر)
     const monthlyAppointments = await Appointment.aggregate([
       { $match: { doctorId: new mongoose.Types.ObjectId(doctorId) } },
@@ -2363,7 +2394,9 @@ app.get('/doctor-analytics/:doctorId', async (req, res) => {
         totalAppointments,
         uniquePatients,
         monthlyAppointments,
-        dailyAppointments
+        dailyAppointments,
+        attendanceStats: attendanceData,
+        attendancePercentages
       }
     });
   } catch (err) {
@@ -2518,9 +2551,62 @@ app.put('/api/appointments/:id/status', async (req, res) => {
   }
 });
 
+// تحديث حالة الحضور
+app.put('/api/appointments/:id/attendance', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { attendance } = req.body;
+    
+    // التأكد من أن القيمة صحيحة
+    if (attendance !== 'present' && attendance !== 'absent') {
+      return res.status(400).json({ error: 'قيمة غير صحيحة لحالة الحضور' });
+    }
+    
+    const updateData = { attendance };
+    if (attendance === 'present') {
+      updateData.attendanceTime = new Date();
+    }
+    
+    const appointment = await Appointment.findByIdAndUpdate(
+      id,
+      updateData,
+      { new: true }
+    );
+    
+    if (!appointment) {
+      return res.status(404).json({ error: 'الموعد غير موجود' });
+    }
+    
+    res.json({ message: 'تم تحديث حالة الحضور بنجاح', appointment });
+  } catch (error) {
+    res.status(500).json({ error: 'خطأ في تحديث حالة الحضور' });
+  }
+});
+
 // جلب التحليل والإحصائيات
 app.get('/api/analytics', async (req, res) => {
   try {
+    // إحصائيات الحضور والغياب
+    const attendanceStats = await Appointment.aggregate([
+      {
+        $group: {
+          _id: '$attendance',
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    // تحويل النتائج إلى كائن مع القيم الافتراضية
+    const attendanceData = {
+      present: 0,
+      absent: 0
+    };
+    attendanceStats.forEach(stat => {
+      if (stat._id === 'present' || stat._id === 'absent') {
+        attendanceData[stat._id] = stat.count;
+      }
+    });
+
     // أفضل الأطباء حسب عدد المواعيد
     const topDoctors = await Appointment.aggregate([
       {
@@ -2633,7 +2719,8 @@ app.get('/api/analytics', async (req, res) => {
       topDoctors,
       topSpecialties,
       monthlyStats,
-      userGrowth
+      userGrowth,
+      attendanceStats: attendanceData
     });
   } catch (error) {
     res.status(500).json({ error: 'خطأ في جلب التحليل' });
