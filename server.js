@@ -823,7 +823,7 @@ app.get('/doctors', async (req, res) => {
   try {
     // جلب الأطباء المميزين أولاً
     const featuredDoctors = await FeaturedDoctor.find({})
-      .populate('doctorId', 'name specialty province area image profileImage about workTimes experienceYears phone clinicLocation mapLocation status active createdAt')
+      .populate('doctorId', 'name specialty province area image profileImage about workTimes experienceYears phone clinicLocation mapLocation status active createdAt disabled')
       .sort({ priority: -1, createdAt: -1 });
     
     // جلب باقي الأطباء الموافق عليهم
