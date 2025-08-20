@@ -261,6 +261,7 @@ const appointmentSchema = new mongoose.Schema({
   date: String,
   time: String,
   reason: String,
+  patientAge: { type: Number, min: 1, max: 120 }, // عمر المريض - إجباري
   status: { type: String, enum: ['pending', 'confirmed', 'cancelled', 'completed'], default: 'pending' },
   price: Number,
   notes: String,
@@ -1274,9 +1275,14 @@ app.get('/pending-doctors', async (req, res) => {
 // حجز موعد جديد
 app.post('/appointments', async (req, res) => {
   try {
-    const { userId, doctorId, userName, doctorName, date, time, reason, duration } = req.body;
-    if (!userId || !doctorId || !date || !time) {
-      return res.status(400).json({ error: 'البيانات ناقصة' });
+    const { userId, doctorId, userName, doctorName, date, time, reason, patientAge, duration } = req.body;
+    if (!userId || !doctorId || !date || !time || !patientAge) {
+      return res.status(400).json({ error: 'البيانات ناقصة - العمر مطلوب' });
+    }
+    
+    // التحقق من صحة العمر
+    if (patientAge < 1 || patientAge > 120) {
+      return res.status(400).json({ error: 'العمر يجب أن يكون بين 1 و 120 سنة' });
     }
     
     // جلب معلومات الطبيب للتحقق من أيام الإجازات
@@ -1311,6 +1317,7 @@ app.post('/appointments', async (req, res) => {
       date,
       time,
       reason,
+      patientAge: Number(patientAge), // عمر المريض
       duration: duration ? Number(duration) : 30 // مدة الموعد بالدقائق
     });
     await appointment.save();
