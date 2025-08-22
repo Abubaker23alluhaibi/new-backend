@@ -316,7 +316,7 @@ const advertisementSchema = new mongoose.Schema({
   status: { 
     type: String, 
     enum: ['active', 'inactive', 'pending'], 
-    default: 'pending' 
+    default: 'active' 
   },
   priority: { type: Number, default: 0 }, // الأولوية في العرض
   target: { 
