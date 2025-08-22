@@ -303,6 +303,38 @@ const featuredDoctorSchema = new mongoose.Schema({
 });
 const FeaturedDoctor = mongoose.model('FeaturedDoctor', featuredDoctorSchema);
 
+// مخطط الإعلانات المتحركة
+const advertisementSchema = new mongoose.Schema({
+  title: { type: String, required: true },
+  description: { type: String, required: true },
+  image: { type: String, required: true }, // رابط الصورة من Cloudinary
+  type: { 
+    type: String, 
+    enum: ['update', 'promotion', 'announcement', 'doctor', 'center'], 
+    default: 'announcement' 
+  },
+  status: { 
+    type: String, 
+    enum: ['active', 'inactive', 'pending'], 
+    default: 'pending' 
+  },
+  priority: { type: Number, default: 0 }, // الأولوية في العرض
+  target: { 
+    type: String, 
+    enum: ['users', 'doctors', 'both'], 
+    default: 'both' 
+  },
+  startDate: { type: Date, required: true },
+  endDate: { type: Date, required: true },
+  isFeatured: { type: Boolean, default: false },
+  clicks: { type: Number, default: 0 }, // عدد النقرات
+  views: { type: Number, default: 0 }, // عدد المشاهدات
+  createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' },
+  createdAt: { type: Date, default: Date.now },
+  updatedAt: { type: Date, default: Date.now }
+});
+const Advertisement = mongoose.model('Advertisement', advertisementSchema);
+
 // مخطط الأدمن
 const adminSchema = new mongoose.Schema({
   email: { type: String, unique: true },
@@ -3199,6 +3231,153 @@ app.get('/api/doctors/featured', async (req, res) => {
   } catch (error) {
     console.error('❌ خطأ في جلب الأطباء المميزين:', error);
     res.status(500).json({ error: 'خطأ في جلب الأطباء المميزين' });
+  }
+});
+
+// ==================== APIs إدارة الإعلانات المتحركة ====================
+
+// جلب الإعلانات النشطة حسب الفئة المستهدفة
+app.get('/advertisements/:target', async (req, res) => {
+  try {
+    const { target } = req.params;
+    const currentDate = new Date();
+    
+    let query = {
+      status: 'active',
+      startDate: { $lte: currentDate },
+      endDate: { $gte: currentDate }
+    };
+    
+    // تحديد الفئة المستهدفة
+    if (target === 'users') {
+      query.target = { $in: ['users', 'both'] };
+    } else if (target === 'doctors') {
+      query.target = { $in: ['doctors', 'both'] };
+    }
+    
+    const advertisements = await Advertisement.find(query)
+      .sort({ priority: -1, isFeatured: -1, createdAt: -1 })
+      .limit(10);
+    
+    res.json(advertisements);
+  } catch (err) {
+    res.status(500).json({ error: 'حدث خطأ أثناء جلب الإعلانات' });
+  }
+});
+
+// جلب جميع الإعلانات (للوحة تحكم الأدمن)
+app.get('/admin/advertisements', async (req, res) => {
+  try {
+    const advertisements = await Advertisement.find({})
+      .sort({ createdAt: -1 });
+    res.json(advertisements);
+  } catch (err) {
+    res.status(500).json({ error: 'حدث خطأ أثناء جلب الإعلانات' });
+  }
+});
+
+// إضافة إعلان جديد
+app.post('/admin/advertisements', async (req, res) => {
+  try {
+    const {
+      title,
+      description,
+      image,
+      type,
+      target,
+      startDate,
+      endDate,
+      priority,
+      isFeatured
+    } = req.body;
+    
+    // التحقق من البيانات المطلوبة
+    if (!title || !description || !image || !target || !startDate || !endDate) {
+      return res.status(400).json({ error: 'جميع الحقول مطلوبة' });
+    }
+    
+    // التحقق من صحة التواريخ
+    if (new Date(startDate) >= new Date(endDate)) {
+      return res.status(400).json({ error: 'تاريخ البداية يجب أن يكون قبل تاريخ النهاية' });
+    }
+    
+    const advertisement = new Advertisement({
+      title,
+      description,
+      image,
+      type: type || 'announcement',
+      target,
+      startDate: new Date(startDate),
+      endDate: new Date(endDate),
+      priority: priority || 0,
+      isFeatured: isFeatured || false,
+      createdBy: req.body.adminId // سيتم إرساله من الواجهة الأمامية
+    });
+    
+    await advertisement.save();
+    res.json({ message: 'تم إضافة الإعلان بنجاح', advertisement });
+  } catch (err) {
+    res.status(500).json({ error: 'حدث خطأ أثناء إضافة الإعلان' });
+  }
+});
+
+// تحديث إعلان
+app.put('/admin/advertisements/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updateData = { ...req.body, updatedAt: new Date() };
+    
+    // التحقق من صحة التواريخ إذا تم تحديثها
+    if (updateData.startDate && updateData.endDate) {
+      if (new Date(updateData.startDate) >= new Date(updateData.endDate)) {
+        return res.status(400).json({ error: 'تاريخ البداية يجب أن يكون قبل تاريخ النهاية' });
+      }
+    }
+    
+    const advertisement = await Advertisement.findByIdAndUpdate(id, updateData, { new: true });
+    if (!advertisement) {
+      return res.status(404).json({ error: 'الإعلان غير موجود' });
+    }
+    
+    res.json({ message: 'تم تحديث الإعلان بنجاح', advertisement });
+  } catch (err) {
+    res.status(500).json({ error: 'حدث خطأ أثناء تحديث الإعلان' });
+  }
+});
+
+// حذف إعلان
+app.delete('/admin/advertisements/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const advertisement = await Advertisement.findByIdAndDelete(id);
+    
+    if (!advertisement) {
+      return res.status(404).json({ error: 'الإعلان غير موجود' });
+    }
+    
+    res.json({ message: 'تم حذف الإعلان بنجاح' });
+  } catch (err) {
+    res.status(500).json({ error: 'حدث خطأ أثناء حذف الإعلان' });
+  }
+});
+
+// تحديث إحصائيات الإعلان (النقرات والمشاهدات)
+app.post('/advertisements/:id/stats', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { action } = req.body; // 'view' أو 'click'
+    
+    const updateData = {};
+    if (action === 'view') {
+      updateData.$inc = { views: 1 };
+    } else if (action === 'click') {
+      updateData.$inc = { clicks: 1 };
+    }
+    
+    await Advertisement.findByIdAndUpdate(id, updateData);
+    res.json({ message: 'تم تحديث الإحصائيات بنجاح' });
+  } catch (err) {
+    res.status(500).json({ error: 'حدث خطأ أثناء تحديث الإحصائيات' });
   }
 });
 
