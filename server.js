@@ -3242,10 +3242,12 @@ app.get('/advertisements/:target', async (req, res) => {
     const { target } = req.params;
     const currentDate = new Date();
     
+    console.log('🔍 طلب جلب إعلانات للفئة:', target);
+    
     let query = {
-      status: 'active',
-      startDate: { $lte: currentDate },
-      endDate: { $gte: currentDate }
+      status: 'active'
+      // startDate: { $lte: currentDate },  // مؤقتاً للاختبار
+      // endDate: { $gte: currentDate }     // مؤقتاً للاختبار
     };
     
     // تحديد الفئة المستهدفة
@@ -3255,12 +3257,35 @@ app.get('/advertisements/:target', async (req, res) => {
       query.target = { $in: ['doctors', 'both'] };
     }
     
+    console.log('📊 الاستعلام المستخدم:', JSON.stringify(query));
+    
+    // أولاً: جلب جميع الإعلانات للتحقق
+    const allAds = await Advertisement.find({});
+    console.log('📋 جميع الإعلانات في قاعدة البيانات:', allAds.length);
+    console.log('📝 تفاصيل الإعلانات:', allAds.map(ad => ({
+      id: ad._id,
+      title: ad.title,
+      status: ad.status,
+      target: ad.target,
+      startDate: ad.startDate,
+      endDate: ad.endDate
+    })));
+    
     const advertisements = await Advertisement.find(query)
       .sort({ priority: -1, isFeatured: -1, createdAt: -1 })
       .limit(10);
     
+    console.log('✅ الإعلانات المطابقة للاستعلام:', advertisements.length);
+    console.log('📤 إرسال الإعلانات:', advertisements.map(ad => ({
+      id: ad._id,
+      title: ad.title,
+      status: ad.status,
+      target: ad.target
+    })));
+    
     res.json(advertisements);
   } catch (err) {
+    console.error('❌ خطأ في جلب الإعلانات:', err);
     res.status(500).json({ error: 'حدث خطأ أثناء جلب الإعلانات' });
   }
 });
