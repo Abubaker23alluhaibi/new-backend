@@ -3770,6 +3770,92 @@ app.post('/upload-profile-image', upload.single('image'), async (req, res) => {
 // Endpoint لخدمة الصور المرفوعة
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
+// Endpoint لرفع صور الإعلانات
+app.post('/upload-advertisement-image', upload.single('image'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'لم يتم رفع أي صورة' });
+    }
+
+    // التحقق من نوع الملف
+    if (!req.file.mimetype.startsWith('image/')) {
+      // حذف الملف المحلي
+      if (fs.existsSync(req.file.path)) {
+        fs.unlinkSync(req.file.path);
+      }
+      return res.status(400).json({ error: 'يجب أن يكون الملف صورة' });
+    }
+
+    // التحقق من حجم الملف (أقل من 5MB)
+    if (req.file.size > 5 * 1024 * 1024) {
+      // حذف الملف المحلي
+      if (fs.existsSync(req.file.path)) {
+        fs.unlinkSync(req.file.path);
+      }
+      return res.status(400).json({ error: 'حجم الصورة يجب أن يكون أقل من 5 ميجابايت' });
+    }
+
+    let imageUrl;
+    let uploadSuccess = false;
+    
+    // محاولة رفع الصورة إلى Cloudinary أولاً
+    if (process.env.CLOUDINARY_URL) {
+      try {
+        console.log('🔄 Attempting to upload advertisement image to Cloudinary...');
+        const result = await cloudinary.uploader.upload(req.file.path, {
+          folder: 'tabibiq-advertisements',
+          transformation: [
+            { width: 800, height: 300, crop: 'fill' }, // الأبعاد المطلوبة للإعلانات
+            { quality: 'auto', fetch_format: 'auto' }
+          ],
+          resource_type: 'image'
+        });
+        imageUrl = result.secure_url;
+        uploadSuccess = true;
+        console.log('✅ Advertisement image uploaded to Cloudinary successfully:', imageUrl);
+        
+        // حذف الملف المحلي بعد رفعه إلى Cloudinary
+        if (fs.existsSync(req.file.path)) {
+          fs.unlinkSync(req.file.path);
+          console.log('🗑️ Local file deleted after Cloudinary upload');
+        }
+      } catch (cloudinaryError) {
+        console.error('❌ Cloudinary upload failed for advertisement:', cloudinaryError);
+        // إذا فشل Cloudinary، استخدم التخزين المحلي
+        const baseUrl = process.env.API_URL || `${req.protocol}://${req.get('host')}`;
+        imageUrl = `${baseUrl}/uploads/${req.file.filename}`;
+        console.log('📁 Using local storage as fallback for advertisement:', imageUrl);
+      }
+    } else {
+      // استخدام التخزين المحلي إذا لم يتم إعداد Cloudinary
+      const baseUrl = process.env.API_URL || `${req.protocol}://${req.get('host')}`;
+      imageUrl = `${baseUrl}/uploads/${req.file.filename}`;
+      console.log('📁 Using local storage for advertisement:', imageUrl);
+    }
+    
+    res.json({ 
+      success: true, 
+      imageUrl,
+      uploadSuccess,
+      message: 'تم رفع صورة الإعلان بنجاح' 
+    });
+  } catch (err) {
+    console.error('❌ Error in advertisement image upload:', err);
+    
+    // حذف الملف المحلي في حالة الخطأ
+    if (req.file && fs.existsSync(req.file.path)) {
+      try {
+        fs.unlinkSync(req.file.path);
+        console.log('🗑️ Local file deleted due to error');
+      } catch (deleteError) {
+        console.error('❌ Error deleting local file:', deleteError);
+      }
+    }
+    
+    res.status(500).json({ error: 'حدث خطأ أثناء رفع صورة الإعلان' });
+  }
+});
+
 // إضافة CORS للصور
 app.use('/uploads', (req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
@@ -4504,5 +4590,121 @@ app.post('/clean-duplicate-appointments', async (req, res) => {
     });
   }
 });
+
+// ===== ENDPOINTS الإعلانات =====
+
+// جلب الإعلانات حسب الهدف
+app.get('/advertisements/:target', async (req, res) => {
+  try {
+    const { target } = req.params;
+    
+    let query = { isActive: true };
+    
+    if (target === 'both') {
+      // إعلانات للجميع
+      query.target = { $in: ['both', 'users', 'doctors'] };
+    } else {
+      // إعلانات محددة
+      query.target = { $in: [target, 'both'] };
+    }
+    
+    // التحقق من التاريخ
+    const now = new Date();
+    query.$and = [
+      { $or: [{ startDate: { $lte: now } }, { startDate: { $exists: false } }] },
+      { $or: [{ endDate: { $gte: now } }, { endDate: { $exists: false } }] }
+    ];
+    
+    // جلب الإعلانات (سنستخدم مصفوفة فارغة مؤقتاً)
+    const advertisements = [];
+    
+    res.json(advertisements);
+  } catch (error) {
+    console.error('خطأ في جلب الإعلانات:', error);
+    res.status(500).json({ error: 'خطأ في جلب الإعلانات' });
+  }
+});
+
+// إنشاء إعلان جديد
+app.post('/advertisements', async (req, res) => {
+  try {
+    const { title, description, image, target, link, startDate, endDate, isActive } = req.body;
+    
+    // التحقق من الحقول المطلوبة
+    if (!title || !description || !image) {
+      return res.status(400).json({ error: 'العنوان والوصف والصورة مطلوبة' });
+    }
+    
+    // إنشاء الإعلان (سنستخدم كائن بسيط مؤقتاً)
+    const advertisement = {
+      _id: Date.now().toString(),
+      title,
+      description,
+      image,
+      target: target || 'users',
+      link: link || '',
+      startDate: startDate || new Date(),
+      endDate: endDate || null,
+      isActive: isActive !== false,
+      stats: { views: 0, clicks: 0 },
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+    
+    res.status(201).json(advertisement);
+  } catch (error) {
+    console.error('خطأ في إنشاء الإعلان:', error);
+    res.status(500).json({ error: 'خطأ في إنشاء الإعلان' });
+  }
+});
+
+// تحديث إعلان
+app.put('/advertisements/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updateData = req.body;
+    
+    // تحديث الإعلان (سنستخدم كائن بسيط مؤقتاً)
+    const advertisement = {
+      ...updateData,
+      _id: id,
+      updatedAt: new Date()
+    };
+    
+    res.json(advertisement);
+  } catch (error) {
+    console.error('خطأ في تحديث الإعلان:', error);
+    res.status(500).json({ error: 'خطأ في تحديث الإعلان' });
+  }
+});
+
+// حذف إعلان
+app.delete('/advertisements/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // حذف الإعلان (سنستخدم رسالة نجاح مؤقتاً)
+    res.json({ message: 'تم حذف الإعلان بنجاح' });
+  } catch (error) {
+    console.error('خطأ في حذف الإعلان:', error);
+    res.status(500).json({ error: 'خطأ في حذف الإعلان' });
+  }
+});
+
+// تحديث إحصائيات الإعلان
+app.post('/advertisements/:id/stats', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { action } = req.body;
+    
+    // تحديث الإحصائيات (سنستخدم رسالة نجاح مؤقتاً)
+    res.json({ success: true, message: 'تم تحديث الإحصائيات بنجاح' });
+  } catch (error) {
+    console.error('خطأ في تحديث الإحصائيات:', error);
+    res.status(500).json({ error: 'خطأ في تحديث الإحصائيات' });
+  }
+});
+
+// ===== نهاية endpoints الإعلانات =====
 
 // إضافة موعد خاص (special appointment)
