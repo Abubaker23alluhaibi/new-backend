@@ -7,16 +7,37 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const cloudinary = require('cloudinary').v2;
+const helmet = require('helmet');
+const mongoSanitize = require('express-mongo-sanitize');
+const rateLimit = require('express-rate-limit');
+const jwt = require('jsonwebtoken');
 
 const app = express();
-// إعدادات CORS محسنة للوصول من الهاتف
+
+// ===== إعدادات الأمان العامة =====
+app.use(helmet()); // حماية HTTP headers
+app.use(mongoSanitize()); // منع NoSQL injection
+app.use(express.json({ limit: '10mb' })); // تحديد حجم البيانات
+
+// Rate Limiting - منع هجمات DDoS
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 دقيقة
+  max: 100, // حد أقصى 100 طلب لكل IP
+  message: { error: 'تم تجاوز الحد الأقصى للطلبات، يرجى المحاولة لاحقاً' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// تطبيق Rate Limiting على جميع APIs
+app.use('/api/', limiter);
+app.use('/register', limiter);
+app.use('/login', limiter);
+
+// إعدادات CORS محسنة ومؤمنة
 const allowedOrigins = [
   'https://www.tabib-iq.com',
   'https://tabib-iq.com',
   'https://tabib-iq-frontend.vercel.app',
-  'https://new-frontend-livid-beta.vercel.app',
-  'https://new-frontend-hetxz9vv9-abubakers-projects-f1e3718d.vercel.app',
-  'https://new-frontend-a1pslmpwn-abubakers-projects-f1e3718d.vercel.app',
   'http://localhost:3000'
 ];
 
@@ -25,12 +46,8 @@ app.use(cors({
     // السماح للطلبات بدون origin (مثل mobile apps)
     if (!origin) return callback(null, true);
     
-    // السماح لأي رابط من Vercel
-    if (origin.includes('vercel.app') || origin.includes('netlify.app')) {
-      return callback(null, true);
-    }
-    
-    if (allowedOrigins.indexOf(origin) !== -1) {
+    // التحقق من النطاقات المسموحة فقط
+    if (allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
       console.log('🚫 Blocked origin:', origin);
@@ -39,9 +56,8 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 }));
-app.use(express.json());
 
 // إعداد مجلد رفع الصور
 const uploadDir = path.join(__dirname, 'uploads');
@@ -128,6 +144,49 @@ const upload = multer({
   }
 });
 
+// ===== إعدادات JWT =====
+const JWT_SECRET = process.env.JWT_SECRET || 'tabibiq-jwt-secret-2024-default-key-change-this-later';
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '24h';
+
+// دالة إنشاء JWT token
+const generateToken = (payload) => {
+  return jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+};
+
+// دالة التحقق من JWT token
+const authenticateToken = (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+  
+  if (!token) {
+    return res.status(401).json({ error: 'Access token required' });
+  }
+  
+  jwt.verify(token, JWT_SECRET, (err, user) => {
+    if (err) {
+      console.log('❌ JWT verification failed:', err.message);
+      return res.status(403).json({ error: 'Invalid or expired token' });
+    }
+    req.user = user;
+    next();
+  });
+};
+
+// دالة التحقق من نوع المستخدم
+const requireUserType = (allowedTypes) => {
+  return (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+    
+    if (!allowedTypes.includes(req.user.user_type)) {
+      return res.status(403).json({ error: 'Insufficient permissions' });
+    }
+    
+    next();
+  };
+};
+
 // اتصال MongoDB
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/tabibiq';
 
@@ -195,7 +254,14 @@ app.get('/api/health', (req, res) => {
   res.json({ 
     status: 'OK',
     timestamp: new Date().toISOString(),
-    mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected'
+    mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+    security: {
+      helmet: 'enabled',
+      mongoSanitize: 'enabled',
+      rateLimit: 'enabled',
+      jwt: 'enabled',
+      cors: 'restricted'
+    }
   });
 });
 
@@ -621,7 +687,16 @@ app.post('/login', async (req, res) => {
             name: admin.name,
             _id: admin._id 
           };
-          return res.json({ message: 'تم تسجيل الدخول بنجاح', userType: 'admin', user: adminUser });
+          
+          // إنشاء JWT token
+          const token = generateToken(adminUser);
+          
+          return res.json({ 
+            message: 'تم تسجيل الدخول بنجاح', 
+            userType: 'admin', 
+            user: adminUser,
+            token: token
+          });
         }
       }
       return res.status(400).json({ error: 'بيانات الدخول غير صحيحة' });
@@ -640,7 +715,16 @@ app.post('/login', async (req, res) => {
         if (!valid) return res.status(400).json({ error: 'بيانات الدخول غير صحيحة' });
         const doctorObj = doctor.toObject();
         doctorObj.user_type = 'doctor';
-        return res.json({ message: 'تم تسجيل الدخول بنجاح', userType: 'doctor', doctor: doctorObj });
+        
+        // إنشاء JWT token
+        const token = generateToken(doctorObj);
+        
+        return res.json({ 
+          message: 'تم تسجيل الدخول بنجاح', 
+          userType: 'doctor', 
+          doctor: doctorObj,
+          token: token
+        });
       }
       // إذا لم يوجد في جدول الأطباء، ابحث في جدول المستخدمين
       let user;
@@ -668,7 +752,16 @@ app.post('/login', async (req, res) => {
         if (!valid) return res.status(400).json({ error: 'بيانات الدخول غير صحيحة' });
         const userObj = user.toObject();
         userObj.user_type = 'user';
-        return res.json({ message: 'تم تسجيل الدخول بنجاح', userType: 'user', user: userObj });
+        
+        // إنشاء JWT token
+        const token = generateToken(userObj);
+        
+        return res.json({ 
+          message: 'تم تسجيل الدخول بنجاح', 
+          userType: 'user', 
+          user: userObj,
+          token: token
+        });
       }
       // إذا لم يوجد في جدول المستخدمين، ابحث في جدول الأطباء
       let doctor;
@@ -839,8 +932,8 @@ app.get('/messages', async (req, res) => {
   }
 });
 
-// جلب قائمة المستخدمين
-app.get('/users', async (req, res) => {
+// جلب قائمة المستخدمين - محمي بـ JWT
+app.get('/users', authenticateToken, requireUserType(['admin']), async (req, res) => {
   try {
     const users = await User.find({}, { password: 0, __v: 0 })
       .sort({ createdAt: -1, _id: -1 });
@@ -888,8 +981,8 @@ app.get('/doctors', async (req, res) => {
   }
 });
 
-// جلب جميع الأطباء (للإدارة - يشمل المعلقين مع جميع البيانات)
-app.get('/admin/doctors', async (req, res) => {
+// جلب جميع الأطباء (للإدارة - يشمل المعلقين مع جميع البيانات) - محمي بـ JWT
+app.get('/admin/doctors', authenticateToken, requireUserType(['admin']), async (req, res) => {
   try {
     const allDoctors = await Doctor.find({}, { password: 0, __v: 0 })
       .populate('centerId', 'name type')
@@ -982,7 +1075,7 @@ app.get('/provinces', async (req, res) => {
 // ========== API المراكز الصحية ==========
 
 // تسجيل مركز صحي جديد (للأدمن فقط)
-app.post('/admin/health-centers', async (req, res) => {
+app.post('/admin/health-centers', authenticateToken, requireUserType(['admin']), async (req, res) => {
   try {
     const { name, email, password, phone, type, description, location, services, specialties, doctors } = req.body;
     
@@ -1050,7 +1143,7 @@ app.post('/admin/health-centers', async (req, res) => {
 });
 
 // جلب جميع المراكز الصحية (للأدمن)
-app.get('/admin/health-centers', async (req, res) => {
+app.get('/admin/health-centers', authenticateToken, requireUserType(['admin']), async (req, res) => {
   try {
     const centers = await HealthCenter.find({}, { password: 0, __v: 0 })
       .sort({ createdAt: -1 });
@@ -1062,7 +1155,7 @@ app.get('/admin/health-centers', async (req, res) => {
 });
 
 // إضافة طبيب لمركز صحي
-app.post('/admin/health-centers/:centerId/doctors', async (req, res) => {
+app.post('/admin/health-centers/:centerId/doctors', authenticateToken, requireUserType(['admin']), async (req, res) => {
   try {
     const { centerId } = req.params;
     const { name, specialty, experience, education, workingHours, description, phone, email } = req.body;
@@ -2450,7 +2543,7 @@ app.get('/doctor-analytics/:doctorId', async (req, res) => {
 // ==================== APIs للأدمن ====================
 
 // جلب جميع المستخدمين
-app.get('/api/users', async (req, res) => {
+app.get('/api/users', authenticateToken, requireUserType(['admin']), async (req, res) => {
   try {
     const users = await User.find({ active: true })
       .select('first_name email phone createdAt')
@@ -2482,7 +2575,7 @@ app.delete('/api/users/:userId', async (req, res) => {
 });
 
 // جلب جميع الأطباء
-app.get('/api/doctors', async (req, res) => {
+app.get('/api/doctors', authenticateToken, requireUserType(['admin']), async (req, res) => {
   try {
     const doctors = await Doctor.find()
       .select('name email specialty status active createdAt is_featured')
@@ -2539,7 +2632,7 @@ app.delete('/api/doctors/:doctorId', async (req, res) => {
 });
 
 // جلب جميع المواعيد
-app.get('/api/appointments', async (req, res) => {
+app.get('/api/appointments', authenticateToken, requireUserType(['admin']), async (req, res) => {
   try {
     const appointments = await Appointment.find()
       .populate('userId', 'first_name')
@@ -3291,7 +3384,7 @@ app.get('/advertisements/:target', async (req, res) => {
 });
 
 // جلب جميع الإعلانات (للوحة تحكم الأدمن)
-app.get('/admin/advertisements', async (req, res) => {
+app.get('/admin/advertisements', authenticateToken, requireUserType(['admin']), async (req, res) => {
   try {
     const advertisements = await Advertisement.find({})
       .sort({ createdAt: -1 });
@@ -3302,7 +3395,7 @@ app.get('/admin/advertisements', async (req, res) => {
 });
 
 // إضافة إعلان جديد
-app.post('/admin/advertisements', async (req, res) => {
+app.post('/admin/advertisements', authenticateToken, requireUserType(['admin']), async (req, res) => {
   try {
     const {
       title,
@@ -3347,7 +3440,7 @@ app.post('/admin/advertisements', async (req, res) => {
 });
 
 // تحديث إعلان
-app.put('/admin/advertisements/:id', async (req, res) => {
+app.put('/admin/advertisements/:id', authenticateToken, requireUserType(['admin']), async (req, res) => {
   try {
     const { id } = req.params;
     const updateData = { ...req.body, updatedAt: new Date() };
@@ -3371,7 +3464,7 @@ app.put('/admin/advertisements/:id', async (req, res) => {
 });
 
 // حذف إعلان
-app.delete('/admin/advertisements/:id', async (req, res) => {
+app.delete('/admin/advertisements/:id', authenticateToken, requireUserType(['admin']), async (req, res) => {
   try {
     const { id } = req.params;
     const advertisement = await Advertisement.findByIdAndDelete(id);
@@ -4379,7 +4472,7 @@ app.get('/server-status', (req, res) => {
 });
 
 // Endpoint لتعطيل أو تفعيل حساب مستخدم أو دكتور
-app.post('/admin/toggle-account/:type/:id', async (req, res) => {
+app.post('/admin/toggle-account/:type/:id', authenticateToken, requireUserType(['admin']), async (req, res) => {
   try {
     const { type, id } = req.params;
     const { disabled } = req.body;
