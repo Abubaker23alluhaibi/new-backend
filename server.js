@@ -33,11 +33,14 @@ app.use('/api/', limiter);
 app.use('/register', limiter);
 app.use('/login', limiter);
 
-// إعدادات CORS محسنة ومؤمنة
+// إعدادات CORS محسنة ومؤمنة - تدعم Vercel و Railway
 const allowedOrigins = [
   'https://www.tabib-iq.com',
   'https://tabib-iq.com',
   'https://tabib-iq-frontend.vercel.app',
+  'https://new-frontend-livid-beta.vercel.app',
+  'https://new-frontend-hetxz9vv9-abubakers-projects-f1e3718d.vercel.app',
+  'https://new-frontend-a1pslmpwn-abubakers-projects-f1e3718d.vercel.app',
   'http://localhost:3000'
 ];
 
@@ -46,7 +49,12 @@ app.use(cors({
     // السماح للطلبات بدون origin (مثل mobile apps)
     if (!origin) return callback(null, true);
     
-    // التحقق من النطاقات المسموحة فقط
+    // السماح لأي رابط من Vercel (مطلوب للفرونت إند)
+    if (origin.includes('vercel.app')) {
+      return callback(null, true);
+    }
+    
+    // التحقق من النطاقات المسموحة الأخرى
     if (allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
