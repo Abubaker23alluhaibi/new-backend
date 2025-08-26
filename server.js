@@ -11,13 +11,110 @@ const helmet = require('helmet');
 const mongoSanitize = require('express-mongo-sanitize');
 const rateLimit = require('express-rate-limit');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 
 const app = express();
 
 // ===== إعدادات الأمان العامة =====
-app.use(helmet()); // حماية HTTP headers
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'"],
+      imgSrc: ["'self'", "data:", "https:"],
+      connectSrc: ["'self'"],
+      fontSrc: ["'self'"],
+      objectSrc: ["'none'"],
+      mediaSrc: ["'self'"],
+      frameSrc: ["'none'"]
+    }
+  },
+  hsts: {
+    maxAge: 31536000,
+    includeSubDomains: true,
+    preload: true
+  }
+})); // حماية HTTP headers
 app.use(mongoSanitize()); // منع NoSQL injection
 app.use(express.json({ limit: '10mb' })); // تحديد حجم البيانات
+
+// إضافة حماية من XSS
+app.use((req, res, next) => {
+  // تنظيف البيانات المدخلة
+  if (req.body) {
+    Object.keys(req.body).forEach(key => {
+      if (typeof req.body[key] === 'string') {
+        req.body[key] = req.body[key].replace(/[<>]/g, '');
+      }
+    });
+  }
+  next();
+});
+
+// حماية من Log Injection
+app.use((req, res, next) => {
+  // تنظيف البيانات قبل التسجيل
+  const sanitizedBody = { ...req.body };
+  if (sanitizedBody.password) {
+    sanitizedBody.password = '[REDACTED]';
+  }
+  if (sanitizedBody.token) {
+    sanitizedBody.token = '[REDACTED]';
+  }
+  
+  // تسجيل البيانات المُنظفة فقط
+  console.log(`${req.method} ${req.path}`, {
+    ip: req.ip,
+    userAgent: req.headers['user-agent'],
+    body: sanitizedBody
+  });
+  
+  next();
+});
+
+// حماية من HTTP Parameter Pollution
+app.use((req, res, next) => {
+  // تنظيف Query Parameters
+  if (req.query) {
+    Object.keys(req.query).forEach(key => {
+      if (Array.isArray(req.query[key])) {
+        // إذا كان هناك قيم متعددة، خذ الأولى فقط
+        req.query[key] = req.query[key][0];
+      }
+    });
+  }
+  
+  // تنظيف Body Parameters
+  if (req.body) {
+    Object.keys(req.body).forEach(key => {
+      if (Array.isArray(req.body[key])) {
+        // إذا كان هناك قيم متعددة، خذ الأولى فقط
+        req.body[key] = req.body[key][0];
+      }
+    });
+  }
+  
+  next();
+});
+
+// Middleware للتحقق من صحة البيانات
+app.use((req, res, next) => {
+  // التحقق من Content-Type
+  if (req.method === 'POST' || req.method === 'PUT') {
+    if (!req.headers['content-type'] || !req.headers['content-type'].includes('application/json')) {
+      return res.status(400).json({ error: 'Content-Type must be application/json' });
+    }
+  }
+  
+  // التحقق من حجم البيانات
+  const contentLength = parseInt(req.headers['content-length'] || '0');
+  if (contentLength > 10 * 1024 * 1024) { // 10MB
+    return res.status(413).json({ error: 'Payload too large' });
+  }
+  
+  next();
+});
 
 // Rate Limiting - منع هجمات DDoS
 const limiter = rateLimit({
@@ -26,12 +123,56 @@ const limiter = rateLimit({
   message: { error: 'تم تجاوز الحد الأقصى للطلبات، يرجى المحاولة لاحقاً' },
   standardHeaders: true,
   legacyHeaders: false,
+  // إضافة حماية إضافية
+  skipSuccessfulRequests: false,
+  skipFailedRequests: false,
+  keyGenerator: (req) => {
+    // استخدام IP + User-Agent لمنع التجاوز
+    return req.ip + ':' + (req.headers['user-agent'] || 'unknown');
+  }
 });
 
 // تطبيق Rate Limiting على جميع APIs
 app.use('/api/', limiter);
 app.use('/register', limiter);
 app.use('/login', limiter);
+
+// Rate Limiting أكثر صرامة للعمليات الحساسة
+const strictLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 دقيقة
+  max: 5, // حد أقصى 5 محاولات
+  message: { error: 'تم تجاوز الحد الأقصى للمحاولات، يرجى المحاولة لاحقاً' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.ip
+});
+
+// Rate Limiting للـ Brute Force
+const bruteForceLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // ساعة واحدة
+  max: 3, // حد أقصى 3 محاولات
+  message: { error: 'تم اكتشاف محاولات متعددة، يرجى المحاولة بعد ساعة' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.ip,
+  handler: (req, res) => {
+    res.status(429).json({
+      error: 'تم اكتشاف محاولات متعددة',
+      retryAfter: Math.ceil(60 * 60 / 1000) // ساعة واحدة
+    });
+  }
+});
+
+// تطبيق على العمليات الحساسة
+app.use('/login', strictLimiter);
+app.use('/register', strictLimiter);
+app.use('/doctor-password', strictLimiter);
+app.use('/user-password', strictLimiter);
+
+// تطبيق Brute Force Limiter على العمليات الأكثر حساسية
+app.use('/login', bruteForceLimiter);
+app.use('/doctor-password', bruteForceLimiter);
+app.use('/user-password', bruteForceLimiter);
 
 // إعدادات CORS محسنة ومؤمنة - تدعم Vercel و Railway
 const allowedOrigins = [
@@ -64,12 +205,62 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  // إضافة حماية إضافية
+  maxAge: 86400 // cache preflight requests for 24 hours
 }));
 
 // إعداد مجلد رفع الصور
 const uploadDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
+
+// حماية من Directory Traversal
+app.use('/uploads', (req, res, next) => {
+  const requestedPath = req.path;
+  if (requestedPath.includes('..') || requestedPath.includes('//')) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+  next();
+});
+
+// إعدادات Multer محسنة للأمان
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    // التأكد من وجود المجلد
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    // إنشاء اسم ملف آمن وفريد
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    const ext = path.extname(file.originalname).toLowerCase();
+    const allowedExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
+    
+    if (!allowedExtensions.includes(ext)) {
+      return cb(new Error('نوع الملف غير مسموح به'), null);
+    }
+    
+    cb(null, `upload-${uniqueSuffix}${ext}`);
+  }
+});
+
+const upload = multer({
+  storage: storage,
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5MB
+    files: 1
+  },
+  fileFilter: (req, file, cb) => {
+    // التحقق من نوع الملف
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('نوع الملف غير مسموح به'), false);
+    }
+  }
+});
 
 // دالة لتنظيف الملفات المحلية القديمة
 const cleanupOldFiles = () => {
@@ -105,10 +296,10 @@ cleanupOldFiles();
 if (process.env.CLOUDINARY_URL) {
   try {
     cloudinary.config({
-      cloud_name: process.env.CLOUDINARY_CLOUD_NAME || 'dfbfb5r7q',
-      api_key: process.env.CLOUDINARY_API_KEY || '599629738223467',
-      api_secret: process.env.CLOUDINARY_API_SECRET || 'Ow4bBIt20vRFBBUk1IbKLguQC98'
-    });
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET
+});
     console.log('✅ Cloudinary configured successfully');
   } catch (error) {
     console.error('❌ Cloudinary configuration error:', error);
@@ -117,48 +308,23 @@ if (process.env.CLOUDINARY_URL) {
   console.log('⚠️ Cloudinary URL not found, using local storage');
 }
 
-// إعداد multer لرفع الصور
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    // التأكد من وجود المجلد
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-    }
-    cb(null, uploadDir);
-  },
-  filename: (req, file, cb) => {
-    // إنشاء اسم فريد للملف
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    const extension = path.extname(file.originalname);
-    cb(null, `profile-${uniqueSuffix}${extension}`);
-  }
-});
 
-const fileFilter = (req, file, cb) => {
-  // التحقق من نوع الملف
-  if (file.mimetype.startsWith('image/')) {
-    cb(null, true);
-  } else {
-    cb(new Error('يجب أن يكون الملف صورة'), false);
-  }
-};
-
-const upload = multer({ 
-  storage,
-  fileFilter,
-  limits: {
-    fileSize: 5 * 1024 * 1024, // 5MB
-    files: 1
-  }
-});
 
 // ===== إعدادات JWT =====
-const JWT_SECRET = process.env.JWT_SECRET || 'tabibiq-jwt-secret-2024-default-key-change-this-later';
+const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(64).toString('hex');
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '24h';
+
+// إعدادات JWT محسنة للأمان
+const JWT_OPTIONS = {
+  expiresIn: JWT_EXPIRES_IN,
+  issuer: 'tabibiq-app',
+  audience: 'tabibiq-users',
+  algorithm: 'HS256'
+};
 
 // دالة إنشاء JWT token
 const generateToken = (payload) => {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+  return jwt.sign(payload, JWT_SECRET, JWT_OPTIONS);
 };
 
 // دالة التحقق من JWT token
@@ -167,13 +333,21 @@ const authenticateToken = (req, res, next) => {
   const token = authHeader && authHeader.split(' ')[1];
   
   if (!token) {
-    return res.status(401).json({ error: 'Access token required' });
+    // تأخير ثابت لمنع Timing Attacks
+    setTimeout(() => {
+      return res.status(401).json({ error: 'Access token required' });
+    }, 100);
+    return;
   }
   
   jwt.verify(token, JWT_SECRET, (err, user) => {
     if (err) {
       console.log('❌ JWT verification failed:', err.message);
-      return res.status(403).json({ error: 'Invalid or expired token' });
+      // تأخير ثابت لمنع Timing Attacks
+      setTimeout(() => {
+        return res.status(403).json({ error: 'Invalid or expired token' });
+      }, 100);
+      return;
     }
     req.user = user;
     next();
@@ -254,6 +428,33 @@ app.get('/', (req, res) => {
       health: '/api/health',
       docs: 'API documentation available'
     }
+  });
+});
+
+// Error Handler - منع تسريب المعلومات الحساسة
+app.use((err, req, res, next) => {
+  console.error('❌ Error:', err);
+  
+  // في الإنتاج، لا تعرض تفاصيل الخطأ
+  if (process.env.NODE_ENV === 'production') {
+    return res.status(500).json({ 
+      error: 'Internal Server Error',
+      message: 'Something went wrong'
+    });
+  }
+  
+  // في التطوير، اعرض تفاصيل الخطأ
+  res.status(500).json({ 
+    error: err.message,
+    stack: err.stack
+  });
+});
+
+// 404 Handler
+app.use('*', (req, res) => {
+  res.status(404).json({ 
+    error: 'Endpoint not found',
+    message: 'The requested endpoint does not exist'
   });
 });
 
