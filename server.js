@@ -240,6 +240,11 @@ app.use(cors({
       return callback(null, true);
     }
     
+    // السماح للنطاق الرئيسي tabib-iq.com
+    if (origin.includes('tabib-iq.com')) {
+      return callback(null, true);
+    }
+    
     // التحقق من النطاقات المسموحة الأخرى
     if (allowedOrigins.includes(origin)) {
       callback(null, true);
@@ -250,7 +255,7 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
   // إضافة حماية إضافية
   maxAge: 86400 // cache preflight requests for 24 hours
 }));
@@ -259,12 +264,23 @@ app.use(cors({
 const uploadDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
 
-// حماية من Directory Traversal
+// حماية من Directory Traversal مع إعدادات CORS للصور
 app.use('/uploads', (req, res, next) => {
   const requestedPath = req.path;
   if (requestedPath.includes('..') || requestedPath.includes('//')) {
     return res.status(403).json({ error: 'Access denied' });
   }
+  
+  // إعدادات CORS للصور
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  
+  // معالجة preflight requests
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+  
   next();
 });
 
@@ -4218,12 +4234,12 @@ app.post('/upload-advertisement-image', upload.single('image'), async (req, res)
   }
 });
 
-// إضافة CORS للصور
+// إضافة CORS للصور (محدث)
 app.use('/uploads', (req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  res.header('Cache-Control', 'public, max-age=31536000'); // كاش لمدة سنة
+  res.header('Cache-Control', 'public, max-age=31536000000'); // كاش لمدة سنة
   res.header('Expires', new Date(Date.now() + 31536000000).toUTCString());
   
   // معالجة preflight requests
