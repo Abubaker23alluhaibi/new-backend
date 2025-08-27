@@ -1,0 +1,16 @@
+node_modules
+npm-debug.log
+.env
+.env.local
+.env.production
+env.local
+env.production
+.git
+.gitignore
+README.md
+Dockerfile
+.dockerignore
+railway.toml
+railway.json
+uploads/*
+!uploads/.gitkeep

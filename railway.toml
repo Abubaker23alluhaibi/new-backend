@@ -1,0 +1,23 @@
+[build]
+builder = "nixpacks"
+
+[deploy]
+startCommand = "npm start"
+healthcheckPath = "/"
+healthcheckTimeout = 30
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3
+
+[environments.production.variables]
+NODE_ENV = "production"
+PORT = "10000"
+MONGO_URI = "mongodb+srv://1223BAKErKreem:Akincilar12AltajiBaGHDad22@cluster0.d2mdyuw.mongodb.net/tabibiq?retryWrites=true&w=majority"
+JWT_SECRET = "tabibiq_jwt_secret_2024_secure_key_xyz789_production_environment"
+CORS_ORIGIN = "https://tabib-iq.vercel.app"
+API_URL = "https://web-production-78766.up.railway.app"
+CLOUDINARY_URL = "cloudinary://599629738223467:Ow4bBIt20vRFBBUk1IbKLguQC98@dfbfb5r7q"
+CLOUDINARY_CLOUD_NAME = "dfbfb5r7q"
+CLOUDINARY_API_KEY = "599629738223467"
+CLOUDINARY_API_SECRET = "Ow4bBIt20vRFBBUk1IbKLguQC98"
+MAX_FILE_SIZE = "5242880"
+UPLOAD_PATH = "./uploads"

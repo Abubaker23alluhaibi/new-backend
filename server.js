@@ -1,4 +1,16 @@
-require('dotenv').config({ path: process.env.NODE_ENV === 'production' ? '.env' : 'env.local' });
+// تحميل متغيرات البيئة - Railway يستخدم متغيرات البيئة مباشرة
+if (process.env.NODE_ENV !== 'production') {
+  require('dotenv').config({ path: 'env.local' });
+}
+
+// طباعة متغيرات البيئة للتشخيص
+console.log('🔧 Environment Variables:');
+console.log('NODE_ENV:', process.env.NODE_ENV);
+console.log('PORT:', process.env.PORT);
+console.log('MONGO_URI:', process.env.MONGO_URI ? 'Set' : 'Not set');
+console.log('JWT_SECRET:', process.env.JWT_SECRET ? 'Set' : 'Not set');
+console.log('API_URL:', process.env.API_URL);
+console.log('CORS_ORIGIN:', process.env.CORS_ORIGIN);
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -14,6 +26,38 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 
 const app = express();
+
+// ===== Health Check Endpoints (يجب أن تكون في البداية) =====
+app.get('/health', (req, res) => {
+  console.log('✅ Health check requested from:', req.ip);
+  res.status(200).json({ 
+    status: 'OK',
+    message: 'Server is running',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    environment: process.env.NODE_ENV || 'development'
+  });
+});
+
+app.get('/api/health', (req, res) => {
+  console.log('✅ API Health check requested from:', req.ip);
+  res.status(200).json({ 
+    status: 'OK',
+    message: 'Server is running',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    environment: process.env.NODE_ENV || 'development'
+  });
+});
+
+// Root endpoint for basic testing
+app.get('/', (req, res) => {
+  res.status(200).json({ 
+    message: 'TabibiQ Backend API is running',
+    timestamp: new Date().toISOString(),
+    version: '1.0.0'
+  });
+});
 
 // ===== إعدادات الأمان العامة =====
 app.use(helmet({
@@ -3817,9 +3861,12 @@ const PORT = process.env.PORT || 5000;
 const server = app.listen(PORT, '0.0.0.0', () => {
   console.log('🚀 Server started successfully!');
   console.log(`🌐 Server running on port ${PORT}`);
-  console.log(`🔗 Health check: http://localhost:${PORT}/api/health`);
+  console.log(`🔗 Health check: http://localhost:${PORT}/health`);
+  console.log(`🔗 API Health check: http://localhost:${PORT}/api/health`);
   console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`⏰ Started at: ${new Date().toISOString()}`);
+  console.log(`🔧 Process ID: ${process.pid}`);
+  console.log(`🌍 Server URL: ${process.env.API_URL || `http://localhost:${PORT}`}`);
 });
 
 // Handle server errors
@@ -3827,7 +3874,25 @@ server.on('error', (error) => {
   console.error('❌ Server error:', error);
   if (error.code === 'EADDRINUSE') {
     console.error('🔍 Port is already in use. Please try a different port.');
+  } else if (error.code === 'EACCES') {
+    console.error('🔒 Permission denied. Try running with elevated privileges.');
+  } else if (error.code === 'EADDRNOTAVAIL') {
+    console.error('🌐 Address not available. Check your network configuration.');
   }
+  
+  // Exit gracefully on critical errors
+  process.exit(1);
+});
+
+// Unhandled error handling
+process.on('uncaughtException', (error) => {
+  console.error('💥 Uncaught Exception:', error);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('💥 Unhandled Rejection at:', promise, 'reason:', reason);
+  process.exit(1);
 });
 
 // Graceful shutdown

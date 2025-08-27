@@ -9,12 +9,15 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "build": "echo \"No build step required for Node.js\"",
     "lint": "echo \"No linting configured\"",
-    "health": "curl -f http://localhost:5000/api/health || exit 1",
+    "health": "curl -f http://localhost:10000/ || exit 1",
     "deploy": "git add . && git commit -m 'Deploy update' && git push",
     "clean": "rm -rf node_modules package-lock.json && npm install",
     "update-deps": "npm update && npm audit fix",
     "logs": "railway logs",
-    "status": "railway status"
+    "status": "railway status",
+    "railway:deploy": "railway up",
+    "railway:logs": "railway logs",
+    "railway:status": "railway status"
   },
   "keywords": [
     "medical",
