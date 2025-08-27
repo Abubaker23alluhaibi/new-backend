@@ -11,6 +11,7 @@ console.log('MONGO_URI:', process.env.MONGO_URI ? 'Set' : 'Not set');
 console.log('JWT_SECRET:', process.env.JWT_SECRET ? 'Set' : 'Not set');
 console.log('API_URL:', process.env.API_URL);
 console.log('CORS_ORIGIN:', process.env.CORS_ORIGIN);
+
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -494,13 +495,7 @@ app.use((err, req, res, next) => {
   });
 });
 
-// 404 Handler
-app.use('*', (req, res) => {
-  res.status(404).json({ 
-    error: 'Endpoint not found',
-    message: 'The requested endpoint does not exist'
-  });
-});
+
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
@@ -5075,3 +5070,14 @@ app.post('/advertisements/:id/stats', async (req, res) => {
 // ===== نهاية endpoints الإعلانات =====
 
 // إضافة موعد خاص (special appointment)
+
+// ===== 404 Handler - يجب أن يكون في النهاية =====
+app.use('*', (req, res) => {
+  console.log('🚫 404 - Endpoint not found:', req.method, req.originalUrl);
+  res.status(404).json({ 
+    error: 'Endpoint not found',
+    message: 'The requested endpoint does not exist',
+    path: req.originalUrl,
+    method: req.method
+  });
+});

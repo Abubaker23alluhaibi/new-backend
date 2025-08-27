@@ -1,101 +1,163 @@
-# دليل الاختبار السريع - TabibiQ Backend
+# 🚀 Quick Test Guide for TabibiQ Backend
 
-## 🚀 اختبار النظام
+## 🔍 Test Health Check Endpoints
 
-### 1. اختبار حالة الخادم
+### 1. Test Root Endpoint
 ```bash
-curl https://web-production-78766.up.railway.app/server-status
+curl http://localhost:10000/
 ```
 
-### 2. اختبار الصحة العامة
-```bash
-curl https://web-production-78766.up.railway.app/api/health
-```
-
-### 3. اختبار Cloudinary
-```bash
-curl https://web-production-78766.up.railway.app/test-cloudinary
-```
-
-### 4. اختبار نظام رفع الصور
-```bash
-curl https://web-production-78766.up.railway.app/test-image-upload
-```
-
-## 📊 النتائج المتوقعة
-
-### server-status
+Expected Response:
 ```json
 {
-  "status": "running",
+  "message": "TabibiQ Backend API is running",
   "timestamp": "2024-01-01T00:00:00.000Z",
-  "environment": "production",
-  "cloudinary": {
-    "configured": true,
-    "cloudName": "dfbfb5r7q",
-    "apiKey": "Set"
-  },
-  "upload": {
-    "directory": "/app/uploads",
-    "exists": true
-  }
+  "version": "1.0.0"
 }
 ```
 
-### test-cloudinary
-```json
-{
-  "status": "success",
-  "message": "Cloudinary يعمل بشكل صحيح",
-  "cloudinaryConfigured": true,
-  "ping": { "status": "ok" }
-}
-```
-
-## 🔧 إذا لم تعمل endpoints
-
-### 1. تحقق من النشر
-- تأكد من أن التحديثات تم رفعها إلى GitHub
-- تحقق من Railway Dashboard للتأكد من النشر
-
-### 2. تحقق من السجلات
-في Railway Dashboard:
-1. اذهب إلى مشروع Backend
-2. اضغط على "Deployments"
-3. اختر آخر deployment
-4. اضغط على "View Logs"
-
-### 3. تحقق من متغيرات البيئة
-تأكد من وجود هذه المتغيرات في Railway:
-```
-CLOUDINARY_URL=cloudinary://599629738223467:Ow4bBIt20vRFBBUk1IbKLguQC98@dfbfb5r7q
-CLOUDINARY_CLOUD_NAME=dfbfb5r7q
-CLOUDINARY_API_KEY=599629738223467
-CLOUDINARY_API_SECRET=Ow4bBIt20vRFBBUk1IbKLguQC98
-```
-
-## 🎯 اختبار رفع الصور
-
-### 1. اختبار رفع صورة
+### 2. Test Health Endpoint
 ```bash
-curl -X POST \
-  -F "image=@/path/to/your/image.jpg" \
-  https://web-production-78766.up.railway.app/upload-profile-image
+curl http://localhost:10000/health
 ```
 
-### 2. النتيجة المتوقعة
+Expected Response:
 ```json
 {
-  "success": true,
-  "imageUrl": "https://res.cloudinary.com/dfbfb5r7q/image/upload/v1234567890/tabibiq-profiles/profile-1234567890.jpg",
-  "uploadSuccess": true,
-  "message": "تم رفع الصورة بنجاح"
+  "status": "OK",
+  "message": "Server is running",
+  "timestamp": "2024-01-01T00:00:00.000Z",
+  "uptime": 123.456,
+  "environment": "development"
 }
 ```
 
-## 📞 إذا استمرت المشاكل
+### 3. Test API Health Endpoint
+```bash
+curl http://localhost:10000/api/health
+```
 
-1. تحقق من سجلات Railway
-2. تأكد من متغيرات البيئة
-3. أعد نشر التطبيق
-4. اتصل بالفريق التقني 
+Expected Response:
+```json
+{
+  "status": "OK",
+  "message": "Server is running",
+  "timestamp": "2024-01-01T00:00:00.000Z",
+  "uptime": 123.456,
+  "environment": "development"
+}
+```
+
+## 🧪 Test with Browser
+
+Open these URLs in your browser:
+- `http://localhost:10000/`
+- `http://localhost:10000/health`
+- `http://localhost:10000/api/health`
+
+## 🐳 Test with Docker
+
+```bash
+# Build and run
+docker build -t tabibiq-backend .
+docker run -p 10000:10000 tabibiq-backend
+
+# Test endpoints
+curl http://localhost:10000/
+```
+
+## 🚂 Test on Railway
+
+After deploying to Railway:
+
+```bash
+# Get your Railway URL
+railway status
+
+# Test health endpoints
+curl https://your-railway-url.railway.app/
+curl https://your-railway-url.railway.app/health
+curl https://your-railway-url.railway.app/api/health
+```
+
+## ❌ Common Issues & Solutions
+
+### Health Check Fails
+- **Port already in use**: Change PORT in env.local
+- **MongoDB connection failed**: Check MONGO_URI
+- **Permission denied**: Run with elevated privileges
+
+### CORS Issues
+- **Frontend can't connect**: Check CORS_ORIGIN setting
+- **Preflight failed**: Verify CORS configuration
+
+### File Upload Issues
+- **Uploads directory missing**: Create uploads/ folder
+- **File size too large**: Check MAX_FILE_SIZE setting
+
+## 📊 Monitor Logs
+
+### Local Development
+```bash
+npm run dev
+# Watch console output for errors
+```
+
+### Railway
+```bash
+railway logs
+# Check for deployment and runtime errors
+```
+
+## 🔧 Environment Variables Check
+
+Verify these are set correctly:
+```bash
+echo $NODE_ENV
+echo $PORT
+echo $MONGO_URI
+echo $JWT_SECRET
+```
+
+## 🚨 Emergency Reset
+
+If everything fails:
+```bash
+# Clean install
+npm run clean
+
+# Reset environment
+cp env.local.example env.local
+# Edit env.local with correct values
+
+# Restart
+npm run dev
+```
+
+## 📱 Test Frontend Connection
+
+Update your frontend environment:
+```env
+REACT_APP_API_URL=http://localhost:10000
+```
+
+Test API calls from frontend to backend.
+
+## ✅ Success Checklist
+
+- [ ] Server starts without errors
+- [ ] Health endpoints return 200 OK
+- [ ] MongoDB connects successfully
+- [ ] Frontend can connect to backend
+- [ ] File uploads work
+- [ ] Authentication endpoints work
+- [ ] Railway deployment successful
+
+## 🆘 Need Help?
+
+1. Check Railway logs: `railway logs`
+2. Check local logs: `npm run dev`
+3. Verify environment variables
+4. Test endpoints individually
+5. Check MongoDB connection
+6. Verify CORS settings 
