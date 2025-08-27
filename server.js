@@ -275,6 +275,8 @@ app.use('/uploads', (req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.header('Cache-Control', 'public, max-age=31536000000'); // كاش لمدة سنة
+  res.header('Expires', new Date(Date.now() + 31536000000).toUTCString());
   
   // معالجة preflight requests
   if (req.method === 'OPTIONS') {
@@ -4234,21 +4236,7 @@ app.post('/upload-advertisement-image', upload.single('image'), async (req, res)
   }
 });
 
-// إضافة CORS للصور (محدث)
-app.use('/uploads', (req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  res.header('Cache-Control', 'public, max-age=31536000000'); // كاش لمدة سنة
-  res.header('Expires', new Date(Date.now() + 31536000000).toUTCString());
-  
-  // معالجة preflight requests
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
-  
-  next();
-});
+
 
 // اختبار Cloudinary
 app.get('/test-cloudinary', async (req, res) => {
