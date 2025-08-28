@@ -592,12 +592,12 @@ const Doctor = mongoose.model('Doctor', doctorSchema);
 
 // مخطط الحجوزات
 const appointmentSchema = new mongoose.Schema({
-  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, // المستخدم الذي قام بالحجز
   doctorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Doctor' },
   centerId: { type: mongoose.Schema.Types.ObjectId, ref: 'HealthCenter' }, // إضافة المركز
   serviceType: { type: String, enum: ['doctor', 'lab', 'xray', 'therapy', 'other'], default: 'doctor' }, // نوع الخدمة
   serviceName: String, // اسم الخدمة المحددة
-  userName: String,
+  userName: String, // اسم المستخدم الذي قام بالحجز
   doctorName: String,
   centerName: String,
   date: String,
@@ -607,8 +607,11 @@ const appointmentSchema = new mongoose.Schema({
   status: { type: String, enum: ['pending', 'confirmed', 'cancelled', 'completed'], default: 'pending' },
   price: Number,
   notes: String,
-  type: { type: String, enum: ['normal', 'special_appointment'], default: 'normal' }, // <-- أضف هذا السطر
-  patientPhone: String, // <-- أضفت هذا السطر لحفظ رقم الهاتف
+  type: { type: String, enum: ['normal', 'special_appointment'], default: 'normal' },
+  patientPhone: String, // رقم هاتف المريض
+  patientName: String, // اسم المريض (قد يكون مختلف عن اسم المستخدم)
+  isBookingForOther: { type: Boolean, default: false }, // هل الحجز لشخص آخر
+  bookerName: String, // اسم الشخص الذي قام بالحجز
   duration: { type: Number, default: 30 }, // مدة الموعد بالدقائق
   attendance: { type: String, enum: ['present', 'absent'], default: 'absent' }, // حالة الحضور - فقط حاضر أو غائب
   attendanceTime: Date, // وقت تسجيل الحضور
@@ -1245,11 +1248,39 @@ app.get('/doctor-appointments/:doctorId', async (req, res) => {
     
     const uniqueAppointments = Array.from(uniqueMap.values());
     
+    // إضافة معلومات إضافية للحجز لشخص آخر
+    const enhancedAppointments = uniqueAppointments.map(appointment => {
+      const enhanced = { ...appointment };
+      
+      // إذا كان الحجز لشخص آخر، أضف معلومات إضافية
+      if (appointment.isBookingForOther) {
+        enhanced.displayInfo = {
+          patientName: appointment.patientName || 'غير محدد',
+          patientAge: appointment.patientAge || 'غير محدد',
+          patientPhone: appointment.patientPhone || 'غير محدد',
+          bookerName: appointment.bookerName || appointment.userName || 'غير محدد',
+          isBookingForOther: true,
+          message: `الحجز من قبل: ${appointment.bookerName || appointment.userName} للمريض: ${appointment.patientName}`
+        };
+      } else {
+        enhanced.displayInfo = {
+          patientName: appointment.userName || 'غير محدد',
+          patientAge: appointment.patientAge || 'غير محدد',
+          patientPhone: appointment.userId?.phone || 'غير محدد',
+          bookerName: appointment.userName || 'غير محدد',
+          isBookingForOther: false,
+          message: `الحجز من قبل: ${appointment.userName}`
+        };
+      }
+      
+      return enhanced;
+    });
+    
     console.log(`🔍 مواعيد الطبيب ${doctorId}:`);
     console.log(`   - المواعيد الأصلية: ${allAppointments.length}`);
     console.log(`   - المواعيد بعد إزالة التكرار: ${uniqueAppointments.length}`);
     
-    res.json(uniqueAppointments);
+    res.json(enhancedAppointments);
   } catch (err) {
     console.error('❌ Error fetching doctor appointments:', err);
     res.status(500).json({ error: 'حدث خطأ أثناء جلب مواعيد الطبيب' });
@@ -1749,12 +1780,203 @@ app.get('/pending-doctors', async (req, res) => {
   }
 });
 
-// حجز موعد جديد
+// حجز موعد جديد (يدعم الحجز لشخص آخر)
 app.post('/appointments', async (req, res) => {
   try {
-    const { userId, doctorId, userName, doctorName, date, time, reason, patientAge, duration } = req.body;
+    const { 
+      userId, 
+      doctorId, 
+      userName, 
+      doctorName, 
+      date, 
+      time, 
+      reason, 
+      patientAge, 
+      duration,
+      patientName, // اسم المريض (قد يكون مختلف عن اسم المستخدم)
+      patientPhone, // رقم هاتف المريض
+      isBookingForOther, // هل الحجز لشخص آخر
+      bookerName // اسم الشخص الذي قام بالحجز
+    } = req.body;
+    
     if (!userId || !doctorId || !date || !time || !patientAge) {
       return res.status(400).json({ error: 'البيانات ناقصة - العمر مطلوب' });
+    }
+    
+    // التحقق من صحة العمر
+    if (patientAge < 1 || patientAge > 120) {
+      return res.status(400).json({ error: 'العمر يجب أن يكون بين 1 و 120 سنة' });
+    }
+    
+    // إذا كان الحجز لشخص آخر، تأكد من وجود اسم المريض
+    if (isBookingForOther && !patientName) {
+      return res.status(400).json({ error: 'اسم المريض مطلوب عند الحجز لشخص آخر' });
+    }
+    
+    // جلب معلومات الطبيب للتحقق من أيام الإجازات
+    const doctor = await Doctor.findById(doctorId);
+    if (!doctor) {
+      return res.status(404).json({ error: 'الطبيب غير موجود' });
+    }
+    
+    // التحقق من أن التاريخ ليس يوم إجازة
+    const dateObj = new Date(date);
+    if (isVacationDay(dateObj, doctor.vacationDays)) {
+      return res.status(400).json({ error: 'لا يمكن الحجز في هذا اليوم لأنه يوم إجازة للطبيب' });
+    }
+    
+    // التحقق من وجود موعد مكرر قبل الإنشاء
+    const existingAppointment = await Appointment.findOne({
+      userId: userId,
+      doctorId: new mongoose.Types.ObjectId(doctorId),
+      date: date,
+      time: time
+    });
+    
+    if (existingAppointment) {
+      return res.status(400).json({ error: 'هذا الموعد محجوز مسبقاً' });
+    }
+    
+    // تحديد اسم المريض النهائي
+    const finalPatientName = isBookingForOther ? patientName : userName;
+    const finalBookerName = isBookingForOther ? (bookerName || userName) : userName;
+    
+    const appointment = new Appointment({
+      userId,
+      doctorId: new mongoose.Types.ObjectId(doctorId),
+      userName: finalBookerName, // اسم الشخص الذي قام بالحجز
+      doctorName: formatDoctorName(doctorName), // إضافة "د." تلقائياً
+      date,
+      time,
+      reason,
+      patientAge: Number(patientAge), // عمر المريض
+      patientName: finalPatientName, // اسم المريض
+      patientPhone: patientPhone || '', // رقم هاتف المريض
+      isBookingForOther: isBookingForOther || false, // هل الحجز لشخص آخر
+      bookerName: finalBookerName, // اسم الشخص الذي قام بالحجز
+      duration: duration ? Number(duration) : 30 // مدة الموعد بالدقائق
+    });
+    
+    await appointment.save();
+    
+    // إشعار للدكتور عند حجز موعد جديد
+    try {
+      let notificationMessage;
+      if (isBookingForOther) {
+        notificationMessage = `تم حجز موعد جديد من قبل ${finalBookerName} للمريض ${finalPatientName} (عمر: ${patientAge}) في ${date} الساعة ${time}`;
+      } else {
+        notificationMessage = `تم حجز موعد جديد من قبل ${finalPatientName} في ${date} الساعة ${time}`;
+      }
+      
+      const notification = await Notification.create({
+        doctorId: new mongoose.Types.ObjectId(doctorId),
+        type: 'new_appointment',
+        message: notificationMessage
+      });
+
+    } catch (notificationError) {
+      // لا نوقف العملية إذا فشل إنشاء الإشعار
+      console.error('❌ Notification error:', notificationError);
+    }
+    
+    res.json({ 
+      message: 'تم حجز الموعد بنجاح', 
+      appointment,
+      bookingInfo: {
+        isForOther: isBookingForOther,
+        patientName: finalPatientName,
+        bookerName: finalBookerName
+      }
+    });
+  } catch (err) {
+    console.error('❌ Appointment booking error:', err);
+    res.status(500).json({ error: 'حدث خطأ أثناء حجز الموعد' });
+  }
+});
+
+// مسار للحصول على معلومات الحجز لشخص آخر
+app.get('/appointment-details/:appointmentId', async (req, res) => {
+  try {
+    const { appointmentId } = req.params;
+    
+    const appointment = await Appointment.findById(appointmentId)
+      .populate('userId', 'first_name phone')
+      .populate('doctorId', 'name specialty');
+    
+    if (!appointment) {
+      return res.status(404).json({ error: 'الموعد غير موجود' });
+    }
+    
+    // تجهيز معلومات العرض
+    const displayInfo = {
+      appointmentId: appointment._id,
+      date: appointment.date,
+      time: appointment.time,
+      doctorName: appointment.doctorName,
+      doctorSpecialty: appointment.doctorId?.specialty,
+      reason: appointment.reason,
+      status: appointment.status,
+      duration: appointment.duration,
+      isBookingForOther: appointment.isBookingForOther || false
+    };
+    
+    if (appointment.isBookingForOther) {
+      // إذا كان الحجز لشخص آخر
+      displayInfo.patientInfo = {
+        name: appointment.patientName,
+        age: appointment.patientAge,
+        phone: appointment.patientPhone
+      };
+      displayInfo.bookerInfo = {
+        name: appointment.bookerName || appointment.userName,
+        phone: appointment.userId?.phone
+      };
+      displayInfo.message = `الحجز من قبل: ${appointment.bookerName || appointment.userName} للمريض: ${appointment.patientName}`;
+    } else {
+      // إذا كان الحجز للشخص نفسه
+      displayInfo.patientInfo = {
+        name: appointment.userName,
+        age: appointment.patientAge,
+        phone: appointment.userId?.phone
+      };
+      displayInfo.bookerInfo = {
+        name: appointment.userName,
+        phone: appointment.userId?.phone
+      };
+      displayInfo.message = `الحجز من قبل: ${appointment.userName}`;
+    }
+    
+    res.json({
+      success: true,
+      appointment: displayInfo
+    });
+    
+  } catch (err) {
+    console.error('❌ Error fetching appointment details:', err);
+    res.status(500).json({ error: 'حدث خطأ أثناء جلب تفاصيل الموعد' });
+  }
+});
+
+// حجز موعد لشخص آخر (بدون رسالة "الحجز لشخص آخر")
+app.post('/appointments-for-other', async (req, res) => {
+  try {
+    const { 
+      userId, 
+      doctorId, 
+      userName, 
+      doctorName, 
+      date, 
+      time, 
+      reason, 
+      patientAge, 
+      duration,
+      patientName, // اسم المريض (مطلوب)
+      patientPhone, // رقم هاتف المريض
+      bookerName // اسم الشخص الذي قام بالحجز
+    } = req.body;
+    
+    if (!userId || !doctorId || !date || !time || !patientAge || !patientName) {
+      return res.status(400).json({ error: 'البيانات ناقصة - العمر واسم المريض مطلوبان' });
     }
     
     // التحقق من صحة العمر
@@ -1789,32 +2011,100 @@ app.post('/appointments', async (req, res) => {
     const appointment = new Appointment({
       userId,
       doctorId: new mongoose.Types.ObjectId(doctorId),
-      userName,
+      userName: bookerName || userName, // اسم الشخص الذي قام بالحجز
       doctorName: formatDoctorName(doctorName), // إضافة "د." تلقائياً
       date,
       time,
       reason,
       patientAge: Number(patientAge), // عمر المريض
+      patientName: patientName, // اسم المريض
+      patientPhone: patientPhone || '', // رقم هاتف المريض
+      isBookingForOther: true, // تأكيد أن الحجز لشخص آخر
+      bookerName: bookerName || userName, // اسم الشخص الذي قام بالحجز
       duration: duration ? Number(duration) : 30 // مدة الموعد بالدقائق
     });
+    
     await appointment.save();
-
     
     // إشعار للدكتور عند حجز موعد جديد
     try {
+      const notificationMessage = `تم حجز موعد جديد من قبل ${bookerName || userName} للمريض ${patientName} (عمر: ${patientAge}) في ${date} الساعة ${time}`;
+      
       const notification = await Notification.create({
         doctorId: new mongoose.Types.ObjectId(doctorId),
         type: 'new_appointment',
-        message: `تم حجز موعد جديد من قبل ${userName} في ${date} الساعة ${time}`
+        message: notificationMessage
       });
 
     } catch (notificationError) {
       // لا نوقف العملية إذا فشل إنشاء الإشعار
+      console.error('❌ Notification error:', notificationError);
     }
     
-    res.json({ message: 'تم حجز الموعد بنجاح', appointment });
+    res.json({ 
+      message: 'تم حجز الموعد بنجاح', 
+      appointment,
+      bookingInfo: {
+        patientName: patientName,
+        bookerName: bookerName || userName
+      }
+    });
   } catch (err) {
+    console.error('❌ Appointment booking for other error:', err);
     res.status(500).json({ error: 'حدث خطأ أثناء حجز الموعد' });
+  }
+});
+
+// مسار للحصول على إحصائيات الحجز لشخص آخر
+app.get('/appointments-stats/:doctorId', async (req, res) => {
+  try {
+    const { doctorId } = req.params;
+    
+    // إجمالي المواعيد
+    const totalAppointments = await Appointment.countDocuments({ doctorId });
+    
+    // المواعيد للحجز لشخص آخر
+    const bookingsForOthers = await Appointment.countDocuments({ 
+      doctorId, 
+      isBookingForOther: true 
+    });
+    
+    // المواعيد للحجز للشخص نفسه
+    const selfBookings = await Appointment.countDocuments({ 
+      doctorId, 
+      isBookingForOther: { $ne: true } 
+    });
+    
+    // المواعيد حسب الحالة
+    const statusStats = await Appointment.aggregate([
+      { $match: { doctorId: new mongoose.Types.ObjectId(doctorId) } },
+      { $group: { _id: '$status', count: { $sum: 1 } } }
+    ]);
+    
+    // المواعيد حسب التاريخ (آخر 7 أيام)
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    
+    const recentBookings = await Appointment.countDocuments({
+      doctorId,
+      createdAt: { $gte: sevenDaysAgo }
+    });
+    
+    res.json({
+      success: true,
+      stats: {
+        total: totalAppointments,
+        forOthers: bookingsForOthers,
+        selfBookings: selfBookings,
+        statusBreakdown: statusStats,
+        recentBookings: recentBookings,
+        percentageForOthers: totalAppointments > 0 ? Math.round((bookingsForOthers / totalAppointments) * 100) : 0
+      }
+    });
+    
+  } catch (err) {
+    console.error('❌ Error fetching appointment stats:', err);
+    res.status(500).json({ error: 'حدث خطأ أثناء جلب إحصائيات المواعيد' });
   }
 });
 
@@ -1895,11 +2185,39 @@ app.get('/doctor-appointments/:doctorId', async (req, res) => {
     
     const uniqueAppointments = Array.from(uniqueMap.values());
     
+    // إضافة معلومات إضافية للحجز لشخص آخر
+    const enhancedAppointments = uniqueAppointments.map(appointment => {
+      const enhanced = { ...appointment };
+      
+      // إذا كان الحجز لشخص آخر، أضف معلومات إضافية
+      if (appointment.isBookingForOther) {
+        enhanced.displayInfo = {
+          patientName: appointment.patientName || 'غير محدد',
+          patientAge: appointment.patientAge || 'غير محدد',
+          patientPhone: appointment.patientPhone || 'غير محدد',
+          bookerName: appointment.bookerName || appointment.userName || 'غير محدد',
+          isBookingForOther: true,
+          message: `الحجز من قبل: ${appointment.bookerName || appointment.userName} للمريض: ${appointment.patientName}`
+        };
+      } else {
+        enhanced.displayInfo = {
+          patientName: appointment.userName || 'غير محدد',
+          patientAge: appointment.patientAge || 'غير محدد',
+          patientPhone: appointment.userId?.phone || 'غير محدد',
+          bookerName: appointment.userName || 'غير محدد',
+          isBookingForOther: false,
+          message: `الحجز من قبل: ${appointment.userName}`
+        };
+      }
+      
+      return enhanced;
+    });
+    
     console.log(`🔍 مواعيد الطبيب ${doctorId}:`);
     console.log(`   - المواعيد الأصلية: ${allAppointments.length}`);
     console.log(`   - المواعيد بعد إزالة التكرار: ${uniqueAppointments.length}`);
     
-    res.json(uniqueAppointments);
+    res.json(enhancedAppointments);
   } catch (err) {
     res.status(500).json({ error: 'حدث خطأ أثناء جلب مواعيد الطبيب' });
   }
@@ -1915,7 +2233,23 @@ app.delete('/appointments/:id', async (req, res) => {
       return res.status(404).json({ error: 'الموعد غير موجود' });
     }
     
-    res.json({ message: 'تم إلغاء الموعد بنجاح' });
+    // إذا كان الحجز لشخص آخر، أضف معلومات إضافية
+    let message = 'تم إلغاء الموعد بنجاح';
+    if (appointment.isBookingForOther) {
+      message = `تم إلغاء موعد المريض ${appointment.patientName} الذي كان محجوز من قبل ${appointment.bookerName}`;
+    }
+    
+    res.json({ 
+      message: message,
+      cancelledAppointment: {
+        id: appointment._id,
+        patientName: appointment.patientName || appointment.userName,
+        bookerName: appointment.bookerName || appointment.userName,
+        date: appointment.date,
+        time: appointment.time,
+        isBookingForOther: appointment.isBookingForOther
+      }
+    });
   } catch (err) {
     res.status(500).json({ error: 'حدث خطأ أثناء إلغاء الموعد' });
   }
