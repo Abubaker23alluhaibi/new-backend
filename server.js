@@ -145,10 +145,11 @@ app.use((req, res, next) => {
 
 // Middleware للتحقق من صحة البيانات
 app.use((req, res, next) => {
-  // التحقق من Content-Type
+  // التحقق من Content-Type - السماح بـ multipart/form-data للملفات
   if (req.method === 'POST' || req.method === 'PUT') {
-    if (!req.headers['content-type'] || !req.headers['content-type'].includes('application/json')) {
-      return res.status(400).json({ error: 'Content-Type must be application/json' });
+    const contentType = req.headers['content-type'] || '';
+    if (!contentType.includes('application/json') && !contentType.includes('multipart/form-data')) {
+      return res.status(400).json({ error: 'Content-Type must be application/json or multipart/form-data' });
     }
   }
   
@@ -232,21 +233,30 @@ const allowedOrigins = [
 
 app.use(cors({
   origin: function (origin, callback) {
+    // إضافة debugging
+    console.log('🌐 CORS check for origin:', origin);
+    
     // السماح للطلبات بدون origin (مثل mobile apps)
-    if (!origin) return callback(null, true);
+    if (!origin) {
+      console.log('✅ Allowing request without origin');
+      return callback(null, true);
+    }
     
     // السماح لأي رابط من Vercel (مطلوب للفرونت إند)
     if (origin.includes('vercel.app')) {
+      console.log('✅ Allowing Vercel origin:', origin);
       return callback(null, true);
     }
     
     // السماح للنطاق الرئيسي tabib-iq.com
     if (origin.includes('tabib-iq.com')) {
+      console.log('✅ Allowing tabib-iq.com origin:', origin);
       return callback(null, true);
     }
     
     // التحقق من النطاقات المسموحة الأخرى
     if (allowedOrigins.includes(origin)) {
+      console.log('✅ Allowing allowed origin:', origin);
       callback(null, true);
     } else {
       console.log('🚫 Blocked origin:', origin);
@@ -832,60 +842,119 @@ app.post('/register', async (req, res) => {
   }
 });
 
+// معالجة preflight request للتسجيل
+app.options('/register-doctor', (req, res) => {
+  // السماح لـ CORS العام بالعمل
+  res.status(200).end();
+});
+
 // تسجيل طبيب جديد (مع إرسال الوثائق على الواتساب)
 app.post('/register-doctor', upload.single('image'), async (req, res) => {
+  // السماح لـ CORS العام بالعمل - لا حاجة لإضافة headers يدوياً
+  
   try {
+    console.log('👨‍⚕️ Doctor registration request received');
+    console.log('📝 Request body:', req.body);
+    console.log('📁 File:', req.file);
+    
     const {
       email, password, name, phone, specialty, province, area, clinicLocation, mapLocation, about, workTimes
     } = req.body;
     
+    // تنظيف البيانات
+    const cleanEmail = email ? email.trim().toLowerCase() : '';
+    const cleanName = name ? name.trim() : '';
+    const cleanPhone = phone ? phone.trim() : '';
+    const cleanSpecialty = specialty ? specialty.trim() : '';
+    const cleanProvince = province ? province.trim() : '';
+    const cleanArea = area ? area.trim() : '';
+    const cleanClinicLocation = clinicLocation ? clinicLocation.trim() : '';
+    const cleanMapLocation = mapLocation ? mapLocation.trim() : '';
+    const cleanAbout = about ? about.trim() : '';
+    
+    // التحقق من الحقول المطلوبة
+    if (!cleanEmail || !password || !cleanName || !cleanPhone || !cleanSpecialty || !cleanProvince || !cleanArea || !cleanClinicLocation) {
+      console.log('❌ Missing required fields:', { 
+        email: !!cleanEmail, 
+        password: !!password, 
+        name: !!cleanName, 
+        phone: !!cleanPhone, 
+        specialty: !!cleanSpecialty, 
+        province: !!cleanProvince, 
+        area: !!cleanArea, 
+        clinicLocation: !!cleanClinicLocation 
+      });
+      return res.status(400).json({ error: 'جميع الحقول مطلوبة' });
+    }
+    
     // توحيد رقم الهاتف
-    const normPhone = normalizePhone(phone);
+    const normPhone = normalizePhone(cleanPhone);
+    console.log('📱 Normalized phone:', normPhone);
     
     // تحقق من وجود الإيميل في قاعدة البيانات (case-insensitive)
-    const existingDoctor = await Doctor.findOne({ email: { $regex: new RegExp(`^${email}$`, 'i') } });
-    const existingUser = await User.findOne({ email: { $regex: new RegExp(`^${email}$`, 'i') } });
+    const existingDoctor = await Doctor.findOne({ email: { $regex: new RegExp(`^${cleanEmail}$`, 'i') } });
+    const existingUser = await User.findOne({ email: { $regex: new RegExp(`^${cleanEmail}$`, 'i') } });
     
     if (existingDoctor || existingUser) {
+      console.log('❌ Email already exists:', cleanEmail);
       return res.status(400).json({ error: 'البريد الإلكتروني مستخدم مسبقًا' });
     }
     
     // تحقق من وجود رقم الهاتف في User أو Doctor
     const phoneUser = await User.findOne({ phone: normPhone });
     const phoneDoctor = await Doctor.findOne({ phone: normPhone });
-    if (phoneUser || phoneDoctor) return res.status(400).json({ error: 'رقم الهاتف مستخدم مسبقًا' });
+    if (phoneUser || phoneDoctor) {
+      console.log('❌ Phone already exists:', normPhone);
+      return res.status(400).json({ error: 'رقم الهاتف مستخدم مسبقًا' });
+    }
     
     // تشفير كلمة المرور
     const hashed = await bcrypt.hash(password, 10);
     
     // مسار الصورة الشخصية فقط (اختيارية)
     const imagePath = req.file ? `/uploads/${req.file.filename}` : '';
+    console.log('🖼️ Image path:', imagePath);
     
     // إنشاء الطبيب الجديد
     const doctor = new Doctor({
-      email,
+      email: cleanEmail,
       password: hashed,
-      name: formatDoctorName(name), // إضافة "د." تلقائياً
+      name: formatDoctorName(cleanName), // إضافة "د." تلقائياً
       phone: normPhone,
-      specialty,
-      province,
-      area,
-      clinicLocation,
-      mapLocation, // رابط الموقع على الخريطة
+      specialty: cleanSpecialty,
+      province: cleanProvince,
+      area: cleanArea,
+      clinicLocation: cleanClinicLocation,
+      mapLocation: cleanMapLocation, // رابط الموقع على الخريطة
       image: imagePath, // الصورة الشخصية فقط
-      about,
-      workTimes: workTimes ? JSON.parse(workTimes) : [],
-      experienceYears: req.body.experienceYears || 0,
+      about: cleanAbout,
+      workTimes: workTimes ? (typeof workTimes === 'string' ? JSON.parse(workTimes) : workTimes) : [],
+      experienceYears: req.body.experienceYears ? Number(req.body.experienceYears) : 0,
       appointmentDuration: req.body.appointmentDuration ? Number(req.body.appointmentDuration) : 30,
       user_type: 'doctor',
-      status: 'pending' // في انتظار إرسال الوثائق
+      status: 'pending', // في انتظار إرسال الوثائق
+      created_at: new Date(),
+      createdAt: new Date()
+    });
+    
+    console.log('💾 Saving doctor to database...');
+    console.log('📋 Doctor data to save:', {
+      email: cleanEmail,
+      name: formatDoctorName(cleanName),
+      phone: normPhone,
+      specialty: cleanSpecialty,
+      province: cleanProvince,
+      area: cleanArea,
+      clinicLocation: cleanClinicLocation,
+      workTimes: workTimes ? (typeof workTimes === 'string' ? JSON.parse(workTimes) : workTimes) : []
     });
     
     await doctor.save();
+    console.log('✅ Doctor saved successfully:', doctor._id);
     
     // إنشاء رابط الواتساب لإرسال الوثائق
     const whatsappNumber = '+9647769012619';
-    const doctorInfo = `👨‍⚕️ طبيب جديد: ${formatDoctorName(name)}\n📧 البريد: ${email}\n📱 الهاتف: ${normPhone}\n🏥 التخصص: ${specialty}\n📍 المحافظة: ${province}`;
+    const doctorInfo = `👨‍⚕️ طبيب جديد: ${formatDoctorName(cleanName)}\n📧 البريد: ${cleanEmail}\n📱 الهاتف: ${normPhone}\n🏥 التخصص: ${cleanSpecialty}\n📍 المحافظة: ${cleanProvince}`;
     
     const whatsappMessage = encodeURIComponent(`مرحباً! 👋
 
@@ -898,12 +967,13 @@ ${doctorInfo}
 4️⃣ صورة شهادة النقابة (الظهر)
 
 📞 رقم الهاتف: ${normPhone}
-📧 البريد الإلكتروني: ${email}
+📧 البريد الإلكتروني: ${cleanEmail}
 
 شكراً لك! 🙏`);
 
     const whatsappLink = `https://wa.me/${whatsappNumber}?text=${whatsappMessage}`;
     
+    console.log('✅ Doctor registration completed successfully');
     res.json({ 
       message: 'تم إنشاء حساب الطبيب بنجاح! يرجى إرسال الوثائق المطلوبة على الواتساب.',
       whatsappLink: whatsappLink,
@@ -918,7 +988,20 @@ ${doctorInfo}
     });
     
   } catch (err) {
-    res.status(500).json({ error: 'حدث خطأ أثناء إنشاء الحساب' });
+    console.error('❌ Doctor registration error:', err);
+    
+    // معالجة أفضل للأخطاء
+    let errorMessage = 'حدث خطأ أثناء إنشاء الحساب';
+    
+    if (err.name === 'ValidationError') {
+      errorMessage = 'بيانات غير صحيحة: ' + Object.values(err.errors).map(e => e.message).join(', ');
+    } else if (err.name === 'MongoError' && err.code === 11000) {
+      errorMessage = 'البريد الإلكتروني أو رقم الهاتف مستخدم مسبقاً';
+    } else if (err.message) {
+      errorMessage = err.message;
+    }
+    
+    res.status(500).json({ error: errorMessage });
   }
 });
 
@@ -1126,17 +1209,19 @@ app.get('/user-appointments/:userId', async (req, res) => {
 app.get('/doctor-appointments/:doctorId', async (req, res) => {
   try {
     const { doctorId } = req.params;
-    const doctorObjectId = new mongoose.Types.ObjectId(doctorId);
     
-
+    // التحقق من صحة doctorId
+    if (!mongoose.Types.ObjectId.isValid(doctorId)) {
+      return res.status(400).json({ error: 'معرف الطبيب غير صحيح' });
+    }
+    
+    const doctorObjectId = new mongoose.Types.ObjectId(doctorId);
     
     // جلب جميع المواعيد مع إزالة التكرار باستخدام distinct
     const allAppointments = await Appointment.find({ doctorId: doctorObjectId })
       .sort({ date: 1, time: 1 })
       .populate('userId', 'first_name phone')
       .lean(); // تحسين الأداء
-    
-
     
     // إزالة التكرار بناءً على مفتاح فريد يجمع بين التاريخ والوقت واسم المريض ونوع الموعد
     const uniqueMap = new Map();
@@ -1166,6 +1251,7 @@ app.get('/doctor-appointments/:doctorId', async (req, res) => {
     
     res.json(uniqueAppointments);
   } catch (err) {
+    console.error('❌ Error fetching doctor appointments:', err);
     res.status(500).json({ error: 'حدث خطأ أثناء جلب مواعيد الطبيب' });
   }
 });
