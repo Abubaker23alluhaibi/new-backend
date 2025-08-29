@@ -5315,6 +5315,15 @@ app.put('/doctor/:id/work-schedule', async (req, res) => {
   try {
     const { id } = req.params;
     const { workTimes, vacationDays } = req.body;
+    
+    // إضافة سجل مفصل للبيانات المستلمة
+    console.log('🔍 /doctor/:id/work-schedule - البيانات المستلمة:', {
+      id,
+      workTimesCount: workTimes ? workTimes.length : 0,
+      vacationDaysCount: vacationDays ? vacationDays.length : 0,
+      workTimes: workTimes,
+      vacationDays: vacationDays
+    });
 
     // السماح بمصفوفات فارغة
     if (!Array.isArray(workTimes)) {
@@ -5327,6 +5336,23 @@ app.put('/doctor/:id/work-schedule', async (req, res) => {
 
     // التحقق من أن أوقات الدوام تحتوي على البيانات المطلوبة إذا لم تكن فارغة
     if (workTimes.length > 0) {
+      console.log('🔍 التحقق من صحة أوقات الدوام...');
+      workTimes.forEach((wt, index) => {
+        console.log(`  WorkTime ${index + 1}:`, {
+          day: wt.day,
+          from: wt.from,
+          to: wt.to,
+          start_time: wt.start_time,
+          end_time: wt.end_time,
+          is_available: wt.is_available,
+          dayValid: !!wt.day,
+          fromValid: !!wt.from,
+          toValid: !!wt.to,
+          startTimeValid: !!wt.start_time,
+          endTimeValid: !!wt.end_time
+        });
+      });
+      
       const invalidWorkTimes = workTimes.filter(wt => 
         !wt || typeof wt !== 'object' || !wt.day || !wt.from || !wt.to || !wt.start_time || !wt.end_time
       );
@@ -5335,6 +5361,8 @@ app.put('/doctor/:id/work-schedule', async (req, res) => {
         console.error('❌ بيانات أوقات الدوام غير صحيحة:', invalidWorkTimes);
         return res.status(400).json({ error: 'بيانات أوقات الدوام غير صحيحة - يرجى التأكد من إدخال جميع البيانات المطلوبة' });
       }
+      
+      console.log('✅ جميع أوقات الدوام صحيحة');
     }
 
     // تنسيق workTimes للشكل المطلوب من قاعدة البيانات
@@ -5352,16 +5380,24 @@ app.put('/doctor/:id/work-schedule', async (req, res) => {
       { workTimes: formattedWorkTimes, vacationDays },
       { new: true }
     );
+    
+    console.log('🔍 تم تحديث الطبيب بنجاح');
+    
+    console.log('🔍 workTimes بعد التنسيق:', formattedWorkTimes);
 
     if (!doctor) {
       return res.status(404).json({ error: 'لم يتم العثور على الطبيب' });
     }
 
-    res.json({ 
+    const responseData = { 
       message: 'تم تحديث جدول العمل والإجازات بنجاح',
       workTimes: doctor.workTimes,
       vacationDays: doctor.vacationDays
-    });
+    };
+    
+    console.log('🔍 البيانات المرسلة في الاستجابة:', responseData);
+    
+    res.json(responseData);
   } catch (err) {
     console.error('❌ خطأ في تحديث جدول العمل والإجازات:', err);
     res.status(500).json({ error: 'حدث خطأ أثناء تحديث جدول العمل والإجازات' });
