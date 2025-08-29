@@ -5283,21 +5283,16 @@ app.put('/doctor/:id/work-schedule', async (req, res) => {
     const { id } = req.params;
     const { workTimes, vacationDays } = req.body;
 
-    if (!workTimes || !Array.isArray(workTimes)) {
+    // السماح بمصفوفات فارغة
+    if (!Array.isArray(workTimes)) {
       return res.status(400).json({ error: 'بيانات أوقات الدوام غير صحيحة' });
     }
 
-    if (!vacationDays || !Array.isArray(vacationDays)) {
+    if (!Array.isArray(vacationDays)) {
       return res.status(400).json({ error: 'بيانات أيام الإجازات غير صحيحة' });
     }
 
-    // التحقق من أن البيانات ليست فارغة تماماً
-    console.log('📤 استلام بيانات من الفرونت إند:', { workTimes, vacationDays });
-    
-    // يمكن أن تكون المصفوفات فارغة (لا مشكلة في ذلك)
-    // ولكن يجب أن تكون مصفوفات صحيحة
-    
-    // التحقق من أن أوقات الدوام تحتوي على البيانات المطلوبة
+    // التحقق من أن أوقات الدوام تحتوي على البيانات المطلوبة إذا لم تكن فارغة
     if (workTimes.length > 0) {
       const invalidWorkTimes = workTimes.filter(wt => 
         !wt || typeof wt !== 'object' || !wt.day || !wt.from || !wt.to
@@ -5318,11 +5313,6 @@ app.put('/doctor/:id/work-schedule', async (req, res) => {
     if (!doctor) {
       return res.status(404).json({ error: 'لم يتم العثور على الطبيب' });
     }
-
-    console.log(`✅ تم تحديث جدول العمل والإجازات للطبيب ${id}:`, {
-      workTimes: doctor.workTimes.length,
-      vacationDays: doctor.vacationDays.length
-    });
 
     res.json({ 
       message: 'تم تحديث جدول العمل والإجازات بنجاح',
