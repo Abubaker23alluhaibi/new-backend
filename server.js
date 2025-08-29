@@ -130,9 +130,14 @@ app.use((req, res, next) => {
     });
   }
   
-  // تنظيف Body Parameters
+  // تنظيف Body Parameters - استثناء workTimes و vacationDays
   if (req.body) {
     Object.keys(req.body).forEach(key => {
+      // استثناء الحقول التي يجب أن تكون مصفوفات
+      if (key === 'workTimes' || key === 'vacationDays') {
+        return; // تخطي هذه الحقول
+      }
+      
       if (Array.isArray(req.body[key])) {
         // إذا كان هناك قيم متعددة، خذ الأولى فقط
         req.body[key] = req.body[key][0];
@@ -5324,13 +5329,40 @@ app.put('/doctor/:id/work-schedule', async (req, res) => {
       workTimes: workTimes,
       vacationDays: vacationDays
     });
+    
+    // إضافة سجل مفصل لـ req.body
+    console.log('🔍 req.body كاملاً:', req.body);
+    console.log('🔍 نوع البيانات المستلمة:', {
+      workTimesType: typeof workTimes,
+      vacationDaysType: typeof vacationDays,
+      workTimesIsArray: Array.isArray(workTimes),
+      vacationDaysIsArray: Array.isArray(vacationDays)
+    });
+    
+    // إضافة سجل مفصل للبيانات بعد التصفية
+    console.log('🔍 البيانات بعد التصفية:', {
+      workTimes: workTimes,
+      vacationDays: vacationDays,
+      workTimesLength: workTimes ? workTimes.length : 'undefined',
+      vacationDaysLength: vacationDays ? vacationDays.length : 'undefined'
+    });
 
     // السماح بمصفوفات فارغة
     if (!Array.isArray(workTimes)) {
+      console.error('❌ workTimes ليس مصفوفة:', {
+        workTimes,
+        type: typeof workTimes,
+        isArray: Array.isArray(workTimes)
+      });
       return res.status(400).json({ error: 'بيانات أوقات الدوام غير صحيحة' });
     }
 
     if (!Array.isArray(vacationDays)) {
+      console.error('❌ vacationDays ليس مصفوفة:', {
+        vacationDays,
+        type: typeof vacationDays,
+        isArray: Array.isArray(vacationDays)
+      });
       return res.status(400).json({ error: 'بيانات أيام الإجازات غير صحيحة' });
     }
 
@@ -5386,7 +5418,16 @@ app.put('/doctor/:id/work-schedule', async (req, res) => {
       // التحقق من أن جميع workTimes تحتوي على الحقول الأساسية فقط
       console.log('✅ جميع workTimes تحتوي على الحقول الأساسية المطلوبة');
       
-
+      // التحقق من أن جميع workTimes تحتوي على الحقول الأساسية
+      const hasValidWorkTimes = workTimes.every(wt => 
+        wt && typeof wt === 'object' && 
+        wt.day && wt.day.trim() !== '' && wt.from && wt.to
+      );
+      
+      if (!hasValidWorkTimes) {
+        console.error('❌ بعض أوقات الدوام لا تحتوي على البيانات المطلوبة');
+        return res.status(400).json({ error: 'بيانات أوقات الدوام غير صحيحة - يرجى التأكد من إدخال جميع البيانات المطلوبة' });
+      }
       
       console.log('✅ جميع أوقات الدوام صحيحة');
     }
