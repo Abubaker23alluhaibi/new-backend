@@ -2233,6 +2233,29 @@ app.delete('/appointments/:id', async (req, res) => {
       return res.status(404).json({ error: 'الموعد غير موجود' });
     }
     
+    // إرسال إشعار للمريض عند إلغاء الموعد
+    try {
+      let notificationMessage;
+      if (appointment.isBookingForOther) {
+        notificationMessage = `تم إلغاء موعدك مع ${appointment.doctorName} في ${appointment.date} الساعة ${appointment.time}. يرجى اختيار موعد آخر.`;
+      } else {
+        notificationMessage = `تم إلغاء موعدك مع ${appointment.doctorName} في ${appointment.date} الساعة ${appointment.time}. يرجى اختيار موعد آخر.`;
+      }
+      
+      // إنشاء إشعار للمريض
+      const patientNotification = await Notification.create({
+        userId: appointment.userId,
+        type: 'appointment_cancelled',
+        message: notificationMessage
+      });
+      
+      console.log(`✅ تم إرسال إشعار إلغاء الموعد للمريض: ${appointment.patientName || appointment.userName}`);
+      
+    } catch (notificationError) {
+      // لا نوقف العملية إذا فشل إنشاء الإشعار
+      console.error('❌ Notification error:', notificationError);
+    }
+    
     // إذا كان الحجز لشخص آخر، أضف معلومات إضافية
     let message = 'تم إلغاء الموعد بنجاح';
     if (appointment.isBookingForOther) {
