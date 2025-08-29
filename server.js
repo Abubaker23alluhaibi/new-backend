@@ -5349,16 +5349,35 @@ app.put('/doctor/:id/work-schedule', async (req, res) => {
           fromValid: !!wt.from,
           toValid: !!wt.to,
           startTimeValid: !!wt.start_time,
-          endTimeValid: !!wt.end_time
+          endTimeValid: !!wt.end_time,
+          isAvailableValid: wt.is_available !== undefined
         });
       });
       
       const invalidWorkTimes = workTimes.filter(wt => 
-        !wt || typeof wt !== 'object' || !wt.day || !wt.from || !wt.to || !wt.start_time || !wt.end_time
+        !wt || typeof wt !== 'object' || !wt.day || !wt.from || !wt.to || !wt.start_time || !wt.end_time || wt.is_available === undefined
       );
       
       if (invalidWorkTimes.length > 0) {
         console.error('❌ بيانات أوقات الدوام غير صحيحة:', invalidWorkTimes);
+        console.error('❌ تفاصيل الأخطاء:');
+        invalidWorkTimes.forEach((wt, index) => {
+          console.error(`  WorkTime ${index + 1}:`, {
+            isObject: typeof wt === 'object',
+            hasDay: !!wt?.day,
+            hasFrom: !!wt?.from,
+            hasTo: !!wt?.to,
+            hasStartTime: !!wt?.start_time,
+            hasEndTime: !!wt?.end_time,
+            hasIsAvailable: wt?.is_available !== undefined,
+            day: wt?.day,
+            from: wt?.from,
+            to: wt?.to,
+            start_time: wt?.start_time,
+            end_time: wt?.end_time,
+            is_available: wt?.is_available
+          });
+        });
         return res.status(400).json({ error: 'بيانات أوقات الدوام غير صحيحة - يرجى التأكد من إدخال جميع البيانات المطلوبة' });
       }
       
@@ -5366,15 +5385,47 @@ app.put('/doctor/:id/work-schedule', async (req, res) => {
     }
 
     // تنسيق workTimes للشكل المطلوب من قاعدة البيانات
-    const formattedWorkTimes = workTimes.map(wt => ({
-      day: wt.day,
-      from: wt.from,
-      to: wt.to,
-      start_time: wt.start_time || wt.from,
-      end_time: wt.end_time || wt.to,
-      is_available: wt.is_available !== undefined ? wt.is_available : true
-    }));
+    const formattedWorkTimes = workTimes.map(wt => {
+      // التحقق من صحة البيانات قبل التنسيق
+      if (!wt || !wt.day || !wt.from || !wt.to) {
+        console.error('❌ بيانات غير صحيحة قبل التنسيق في السيرفر:', wt);
+        return null;
+      }
+      
+      const formatted = {
+        day: wt.day,
+        from: wt.from,
+        to: wt.to,
+        start_time: wt.start_time || wt.from,
+        end_time: wt.end_time || wt.to,
+        is_available: wt.is_available !== undefined ? wt.is_available : true
+      };
+      
+      console.log('✅ تم تنسيق workTime في السيرفر:', formatted);
+      return formatted;
+    }).filter(Boolean); // إزالة القيم الفارغة
 
+    // التحقق من أن formattedWorkTimes يحتوي على بيانات
+    if (!formattedWorkTimes || formattedWorkTimes.length === 0) {
+      console.error('❌ formattedWorkTimes فارغ أو غير صحيح في السيرفر');
+      return res.status(400).json({ error: 'خطأ في تنسيق البيانات - يرجى المحاولة مرة أخرى' });
+    }
+    
+    console.log('🔍 formattedWorkTimes قبل التحديث:', formattedWorkTimes);
+    
+    // التحقق النهائي من أن جميع formattedWorkTimes تحتوي على الحقول المطلوبة
+    const finalValidation = formattedWorkTimes.every(wt => 
+      wt && wt.day && wt.from && wt.to && wt.start_time && wt.end_time && wt.is_available !== undefined
+    );
+    
+    if (!finalValidation) {
+      console.error('❌ التحقق النهائي فشل في السيرفر - بعض الكائنات لا تحتوي على الحقول المطلوبة');
+      console.error('❌ formattedWorkTimes:', formattedWorkTimes);
+      return res.status(400).json({ error: 'خطأ في تنسيق البيانات - يرجى المحاولة مرة أخرى' });
+    }
+    
+    console.log('✅ التحقق النهائي نجح في السيرفر - جميع الكائنات تحتوي على الحقول المطلوبة');
+    
     const doctor = await Doctor.findByIdAndUpdate(
       id,
       { workTimes: formattedWorkTimes, vacationDays },
@@ -5396,6 +5447,24 @@ app.put('/doctor/:id/work-schedule', async (req, res) => {
     };
     
     console.log('🔍 البيانات المرسلة في الاستجابة:', responseData);
+    
+    // التحقق من أن البيانات المرسلة في الاستجابة صحيحة
+    if (!responseData.workTimes || !Array.isArray(responseData.workTimes)) {
+      console.error('❌ البيانات المرسلة في الاستجابة غير صحيحة:', responseData);
+      return res.status(500).json({ error: 'خطأ في البيانات المرسلة' });
+    }
+    
+    // التحقق من أن جميع workTimes في الاستجابة تحتوي على الحقول المطلوبة
+    const responseValidation = responseData.workTimes.every(wt => 
+      wt && wt.day && wt.from && wt.to && wt.start_time && wt.end_time && wt.is_available !== undefined
+    );
+    
+    if (!responseValidation) {
+      console.error('❌ workTimes في الاستجابة غير صحيحة:', responseData.workTimes);
+      return res.status(500).json({ error: 'خطأ في البيانات المرسلة' });
+    }
+    
+    console.log('✅ البيانات المرسلة في الاستجابة صحيحة');
     
     res.json(responseData);
   } catch (err) {
