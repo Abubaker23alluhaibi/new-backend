@@ -931,7 +931,18 @@ app.post('/register-doctor', upload.single('image'), async (req, res) => {
       mapLocation: cleanMapLocation, // رابط الموقع على الخريطة
       image: imagePath, // الصورة الشخصية فقط
       about: cleanAbout,
-      workTimes: workTimes ? (typeof workTimes === 'string' ? JSON.parse(workTimes) : workTimes) : [],
+      workTimes: (() => {
+        let parsedWorkTimes = workTimes ? (typeof workTimes === 'string' ? JSON.parse(workTimes) : workTimes) : [];
+        // تنسيق workTimes للشكل المطلوب من قاعدة البيانات
+        return parsedWorkTimes.map(wt => ({
+          day: wt.day,
+          from: wt.from,
+          to: wt.to,
+          start_time: wt.start_time || wt.from,
+          end_time: wt.end_time || wt.to,
+          is_available: wt.is_available !== undefined ? wt.is_available : true
+        }));
+      })(),
       experienceYears: req.body.experienceYears ? Number(req.body.experienceYears) : 0,
       appointmentDuration: req.body.appointmentDuration ? Number(req.body.appointmentDuration) : 30,
       user_type: 'doctor',
@@ -5221,9 +5232,31 @@ app.put('/doctor/:id/work-times', async (req, res) => {
       return res.status(400).json({ error: 'بيانات أوقات الدوام غير صحيحة' });
     }
 
+    // التحقق من أن أوقات الدوام تحتوي على البيانات المطلوبة
+    if (workTimes.length > 0) {
+      const invalidWorkTimes = workTimes.filter(wt => 
+        !wt || typeof wt !== 'object' || !wt.day || !wt.from || !wt.to || !wt.start_time || !wt.end_time
+      );
+      
+      if (invalidWorkTimes.length > 0) {
+        console.error('❌ بيانات أوقات الدوام غير صحيحة:', invalidWorkTimes);
+        return res.status(400).json({ error: 'بيانات أوقات الدوام غير صحيحة - يرجى التأكد من إدخال جميع البيانات المطلوبة' });
+      }
+    }
+
+    // تنسيق workTimes للشكل المطلوب من قاعدة البيانات
+    const formattedWorkTimes = workTimes.map(wt => ({
+      day: wt.day,
+      from: wt.from,
+      to: wt.to,
+      start_time: wt.start_time || wt.from,
+      end_time: wt.end_time || wt.to,
+      is_available: wt.is_available !== undefined ? wt.is_available : true
+    }));
+
     const doctor = await Doctor.findByIdAndUpdate(
       id,
-      { workTimes },
+      { workTimes: formattedWorkTimes },
       { new: true }
     );
 
@@ -5295,7 +5328,7 @@ app.put('/doctor/:id/work-schedule', async (req, res) => {
     // التحقق من أن أوقات الدوام تحتوي على البيانات المطلوبة إذا لم تكن فارغة
     if (workTimes.length > 0) {
       const invalidWorkTimes = workTimes.filter(wt => 
-        !wt || typeof wt !== 'object' || !wt.day || !wt.from || !wt.to
+        !wt || typeof wt !== 'object' || !wt.day || !wt.from || !wt.to || !wt.start_time || !wt.end_time
       );
       
       if (invalidWorkTimes.length > 0) {
@@ -5304,9 +5337,19 @@ app.put('/doctor/:id/work-schedule', async (req, res) => {
       }
     }
 
+    // تنسيق workTimes للشكل المطلوب من قاعدة البيانات
+    const formattedWorkTimes = workTimes.map(wt => ({
+      day: wt.day,
+      from: wt.from,
+      to: wt.to,
+      start_time: wt.start_time || wt.from,
+      end_time: wt.end_time || wt.to,
+      is_available: wt.is_available !== undefined ? wt.is_available : true
+    }));
+
     const doctor = await Doctor.findByIdAndUpdate(
       id,
-      { workTimes, vacationDays },
+      { workTimes: formattedWorkTimes, vacationDays },
       { new: true }
     );
 
