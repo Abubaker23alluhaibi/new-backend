@@ -5291,6 +5291,24 @@ app.put('/doctor/:id/work-schedule', async (req, res) => {
       return res.status(400).json({ error: 'بيانات أيام الإجازات غير صحيحة' });
     }
 
+    // التحقق من أن البيانات ليست فارغة تماماً
+    console.log('📤 استلام بيانات من الفرونت إند:', { workTimes, vacationDays });
+    
+    // يمكن أن تكون المصفوفات فارغة (لا مشكلة في ذلك)
+    // ولكن يجب أن تكون مصفوفات صحيحة
+    
+    // التحقق من أن أوقات الدوام تحتوي على البيانات المطلوبة
+    if (workTimes.length > 0) {
+      const invalidWorkTimes = workTimes.filter(wt => 
+        !wt || typeof wt !== 'object' || !wt.day || !wt.from || !wt.to
+      );
+      
+      if (invalidWorkTimes.length > 0) {
+        console.error('❌ بيانات أوقات الدوام غير صحيحة:', invalidWorkTimes);
+        return res.status(400).json({ error: 'بيانات أوقات الدوام غير صحيحة - يرجى التأكد من إدخال جميع البيانات المطلوبة' });
+      }
+    }
+
     const doctor = await Doctor.findByIdAndUpdate(
       id,
       { workTimes, vacationDays },
