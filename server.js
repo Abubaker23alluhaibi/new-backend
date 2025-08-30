@@ -618,7 +618,7 @@ const appointmentSchema = new mongoose.Schema({
   isBookingForOther: { type: Boolean, default: false }, // هل الحجز لشخص آخر
   bookerName: String, // اسم الشخص الذي قام بالحجز
   duration: { type: Number, default: 30 }, // مدة الموعد بالدقائق
-  attendance: { type: String, enum: ['attended', 'absent', 'not_set'], default: 'not_set' }, // حالة الحضور - فقط حاضر أو غائب
+  attendance: { type: String, enum: ['present', 'absent', 'not_set'], default: 'not_set' }, // حالة الحضور - فقط حاضر أو غائب
   attendanceTime: Date, // وقت تسجيل الحضور
   createdAt: { type: Date, default: Date.now }
 });
@@ -3186,13 +3186,13 @@ app.get('/doctor-analytics/:doctorId', async (req, res) => {
     });
 
     // حساب النسب المئوية
-    const presentCount = attendanceData.attended || 0;
+    const presentCount = attendanceData.present || 0;
     const absentCount = attendanceData.absent || 0;
     const pendingCount = attendanceData.not_set || 0;
     const totalWithAttendance = presentCount + absentCount + pendingCount;
     
     const attendancePercentages = {
-      attended: totalWithAttendance > 0 ? ((presentCount / totalWithAttendance) * 100).toFixed(1) : 0,
+      present: totalWithAttendance > 0 ? ((presentCount / totalWithAttendance) * 100).toFixed(1) : 0,
       absent: totalWithAttendance > 0 ? ((absentCount / totalWithAttendance) * 100).toFixed(1) : 0,
       not_set: totalWithAttendance > 0 ? ((pendingCount / totalWithAttendance) * 100).toFixed(1) : 0
     };
@@ -3430,12 +3430,12 @@ app.put('/api/appointments/:id/attendance', async (req, res) => {
     const { attendance } = req.body;
     
     // التأكد من أن القيمة صحيحة
-    if (attendance !== 'attended' && attendance !== 'absent') {
+    if (attendance !== 'present' && attendance !== 'absent') {
       return res.status(400).json({ error: 'قيمة غير صحيحة لحالة الحضور' });
     }
     
     const updateData = { attendance };
-    if (attendance === 'attended') {
+    if (attendance === 'present') {
       updateData.attendanceTime = new Date();
     }
     
@@ -3470,11 +3470,11 @@ app.get('/api/analytics', async (req, res) => {
 
     // تحويل النتائج إلى كائن مع القيم الافتراضية
     const attendanceData = {
-      attended: 0,
+      present: 0,
       absent: 0
     };
     attendanceStats.forEach(stat => {
-      if (stat._id === 'attended' || stat._id === 'absent') {
+      if (stat._id === 'present' || stat._id === 'absent') {
         attendanceData[stat._id] = stat.count;
       }
     });
