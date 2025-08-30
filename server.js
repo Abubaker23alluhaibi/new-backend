@@ -629,14 +629,14 @@ const employeeSchema = new mongoose.Schema({
   doctorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Doctor', required: true }, // الطبيب المسؤول
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, // المستخدم المرتبط (اختياري)
   phone: { type: String, required: true }, // رقم الهاتف العراقي
-  name: { type: String, required: true }, // اسم الموظف
+  name: { type: String, default: 'موظف' }, // اسم الموظف (اختياري)
   email: String, // البريد الإلكتروني (اختياري)
-  position: { type: String, default: 'موظف' }, // المنصب
+  position: { type: String, default: 'موظف' }, // المنصب (اختياري)
   status: { type: String, enum: ['active', 'inactive', 'suspended'], default: 'active' }, // حالة الموظف
   hireDate: { type: Date, default: Date.now }, // تاريخ التعيين
-  salary: Number, // الراتب
-  commission: { type: Number, default: 0 }, // العمولة
-  notes: String, // ملاحظات
+  salary: Number, // الراتب (اختياري)
+  commission: { type: Number, default: 0 }, // العمولة (اختياري)
+  notes: String, // ملاحظات (اختياري)
   createdAt: { type: Date, default: Date.now }
 });
 
@@ -5833,14 +5833,24 @@ app.post('/advertisements/:id/stats', async (req, res) => {
 
 // ===== نظام إدارة الموظفين للأطباء =====
 
+// دالة لحساب رقم الأسبوع
+function getWeekNumber(date) {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() + 4 - (d.getDay() || 7));
+  const yearStart = new Date(d.getFullYear(), 0, 1);
+  const weekNo = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+  return weekNo;
+}
+
 // إضافة موظف جديد للطبيب
 app.post('/api/employees', async (req, res) => {
   try {
     const { doctorId, phone, name, email, position, salary, commission, notes } = req.body;
     
-    // التحقق من الحقول المطلوبة
-    if (!doctorId || !phone || !name) {
-      return res.status(400).json({ error: 'معرف الطبيب ورقم الهاتف والاسم مطلوبة' });
+    // التحقق من الحقول المطلوبة - رقم الهاتف فقط إجباري
+    if (!doctorId || !phone) {
+      return res.status(400).json({ error: 'معرف الطبيب ورقم الهاتف مطلوبان' });
     }
     
     // التحقق من أن الطبيب موجود
@@ -5855,24 +5865,88 @@ app.post('/api/employees', async (req, res) => {
       return res.status(400).json({ error: 'رقم الهاتف يجب أن يكون بتنسيق عراقي صحيح' });
     }
     
+    // فحص إذا كان الرقم مربوط بحساب مستخدم موجود
+    let userId = null;
+    let existingUser = null;
+    
+    try {
+      existingUser = await User.findOne({ phone });
+      if (existingUser) {
+        userId = existingUser._id;
+        console.log(`تم العثور على مستخدم برقم الهاتف: ${existingUser.first_name} ${existingUser.last_name}`);
+      }
+    } catch (userError) {
+      console.log('خطأ في البحث عن المستخدم:', userError);
+    }
+    
     // إنشاء الموظف
     const employee = new Employee({
       doctorId,
       phone,
-      name,
+      name: name || `موظف ${phone.slice(-4)}`, // اسم افتراضي إذا لم يتم توفيره
       email,
       position: position || 'موظف',
       salary,
       commission: commission || 0,
-      notes
+      notes,
+      userId // ربط المستخدم إذا تم العثور عليه
     });
     
     await employee.save();
     
+    // إذا كان هناك مستخدم مرتبط، حساب حجوزاته السابقة
+    if (userId) {
+      try {
+        // البحث عن الحجوزات السابقة لهذا المستخدم مع هذا الطبيب
+        const existingAppointments = await Appointment.find({
+          doctorId,
+          $or: [
+            { patientId: userId }, // حجوزات مباشرة
+            { bookedFor: userId }  // حجوزات لحساب آخرين
+          ]
+        });
+        
+        if (existingAppointments.length > 0) {
+          console.log(`تم العثور على ${existingAppointments.length} حجز سابق للمستخدم ${existingUser.first_name}`);
+          
+          // إضافة نقاط للحجوزات السابقة
+          for (const appointment of existingAppointments) {
+            const pointsData = {
+              employeeId: employee._id,
+              doctorId,
+              appointmentId: appointment._id,
+              points: 1,
+              type: 'appointment',
+              description: `حجز سابق - ${appointment.appointmentDate ? new Date(appointment.appointmentDate).toLocaleDateString('ar-EG') : 'تاريخ غير محدد'}`,
+              date: appointment.createdAt || new Date(),
+              week: getWeekNumber(appointment.createdAt || new Date()),
+              month: (appointment.createdAt || new Date()).getMonth() + 1,
+              year: (appointment.createdAt || new Date()).getFullYear()
+            };
+            
+            const points = new Points(pointsData);
+            await points.save();
+          }
+          
+          // تحديث إحصائيات الموظف
+          await updateEmployeeStats(employee._id, doctorId);
+        }
+      } catch (statsError) {
+        console.error('خطأ في حساب الإحصائيات السابقة:', statsError);
+      }
+    }
+    
     res.status(201).json({
       success: true,
-      message: 'تم إضافة الموظف بنجاح',
-      employee
+      message: existingUser ? 
+        `تم إضافة الموظف بنجاح وربطه بالمستخدم ${existingUser.first_name} ${existingUser.last_name}` :
+        'تم إضافة الموظف بنجاح',
+      employee,
+      linkedUser: existingUser ? {
+        id: existingUser._id,
+        name: `${existingUser.first_name} ${existingUser.last_name}`,
+        email: existingUser.email
+      } : null
     });
     
   } catch (error) {
