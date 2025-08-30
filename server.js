@@ -617,9 +617,8 @@ const appointmentSchema = new mongoose.Schema({
   patientName: String, // اسم المريض (قد يكون مختلف عن اسم المستخدم)
   isBookingForOther: { type: Boolean, default: false }, // هل الحجز لشخص آخر
   bookerName: String, // اسم الشخص الذي قام بالحجز
-  bookerPhone: String, // رقم هاتف الشخص الذي قام بالحجز
   duration: { type: Number, default: 30 }, // مدة الموعد بالدقائق
-  attendance: { type: String, enum: ['attended', 'absent', 'not_set'], default: 'not_set' }, // حالة الحضور
+  attendance: { type: String, enum: ['attended', 'absent', 'not_set'], default: 'not_set' }, // حالة الحضور - فقط حاضر أو غائب
   attendanceTime: Date, // وقت تسجيل الحضور
   createdAt: { type: Date, default: Date.now }
 });
@@ -696,6 +695,21 @@ const adminSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 const Admin = mongoose.model('Admin', adminSchema);
+
+// مخطط تتبع الأشخاص الذين قاموا بالحجز للآخرين
+const trackedBookerForOtherSchema = new mongoose.Schema({
+  doctorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Doctor', required: true },
+  bookerPhone: { type: String, required: true }, // رقم هاتف الشخص الذي قام بالحجز
+  bookerName: { type: String, required: true }, // اسم الشخص الذي قام بالحجز
+  isActive: { type: Boolean, default: true }, // هل التتبع نشط
+  createdAt: { type: Date, default: Date.now },
+  updatedAt: { type: Date, default: Date.now }
+});
+
+// إنشاء index مركب لضمان عدم تكرار نفس الشخص لنفس الطبيب
+trackedBookerForOtherSchema.index({ doctorId: 1, bookerPhone: 1 }, { unique: true });
+
+const TrackedBookerForOther = mongoose.model('TrackedBookerForOther', trackedBookerForOtherSchema);
 
 // مخطط المراكز الصحية
 const healthCenterSchema = new mongoose.Schema({
@@ -3172,15 +3186,15 @@ app.get('/doctor-analytics/:doctorId', async (req, res) => {
     });
 
     // حساب النسب المئوية
-    const presentCount = attendanceData.present || 0;
+    const presentCount = attendanceData.attended || 0;
     const absentCount = attendanceData.absent || 0;
-    const pendingCount = attendanceData.pending || 0;
+    const pendingCount = attendanceData.not_set || 0;
     const totalWithAttendance = presentCount + absentCount + pendingCount;
     
     const attendancePercentages = {
-      present: totalWithAttendance > 0 ? ((presentCount / totalWithAttendance) * 100).toFixed(1) : 0,
+      attended: totalWithAttendance > 0 ? ((presentCount / totalWithAttendance) * 100).toFixed(1) : 0,
       absent: totalWithAttendance > 0 ? ((absentCount / totalWithAttendance) * 100).toFixed(1) : 0,
-      pending: totalWithAttendance > 0 ? ((pendingCount / totalWithAttendance) * 100).toFixed(1) : 0
+      not_set: totalWithAttendance > 0 ? ((pendingCount / totalWithAttendance) * 100).toFixed(1) : 0
     };
 
     // المواعيد الشهرية (آخر 12 شهر)
@@ -3416,12 +3430,12 @@ app.put('/api/appointments/:id/attendance', async (req, res) => {
     const { attendance } = req.body;
     
     // التأكد من أن القيمة صحيحة
-    if (attendance !== 'present' && attendance !== 'absent') {
+    if (attendance !== 'attended' && attendance !== 'absent') {
       return res.status(400).json({ error: 'قيمة غير صحيحة لحالة الحضور' });
     }
     
     const updateData = { attendance };
-    if (attendance === 'present') {
+    if (attendance === 'attended') {
       updateData.attendanceTime = new Date();
     }
     
@@ -3456,11 +3470,11 @@ app.get('/api/analytics', async (req, res) => {
 
     // تحويل النتائج إلى كائن مع القيم الافتراضية
     const attendanceData = {
-      present: 0,
+      attended: 0,
       absent: 0
     };
     attendanceStats.forEach(stat => {
-      if (stat._id === 'present' || stat._id === 'absent') {
+      if (stat._id === 'attended' || stat._id === 'absent') {
         attendanceData[stat._id] = stat.count;
       }
     });
@@ -5721,8 +5735,8 @@ app.post('/advertisements/:id/stats', async (req, res) => {
 
 // ===== API endpoints لإدارة الأشخاص الذين قاموا بحجز مواعيد للآخرين =====
 
-// جلب الأشخاص الذين قاموا بحجز مواعيد للآخرين لطبيب معين
-app.get('/api/doctors/:doctorId/bookings-for-others', async (req, res) => {
+// جلب جميع الأشخاص الذين قاموا بحجز مواعيد للآخرين لطبيب معين (للاختيار منهم)
+app.get('/api/doctors/:doctorId/all-other-bookers', async (req, res) => {
   try {
     const { doctorId } = req.params;
     
@@ -5738,57 +5752,105 @@ app.get('/api/doctors/:doctorId/bookings-for-others', async (req, res) => {
     }).populate('userId', 'first_name phone');
 
     // تجميع البيانات حسب الشخص الذي قام بالحجز
-    const personsMap = new Map();
+    const bookersMap = new Map();
 
     appointments.forEach(appointment => {
       const bookerKey = appointment.bookerPhone || appointment.userId?.phone;
       
       if (bookerKey) {
-        if (!personsMap.has(bookerKey)) {
-          personsMap.set(bookerKey, {
-            _id: bookerKey, // استخدام رقم الهاتف كمعرف فريد
+        if (!bookersMap.has(bookerKey)) {
+          bookersMap.set(bookerKey, {
+            _id: bookerKey,
             name: appointment.bookerName || appointment.userName || 'غير محدد',
             phone: bookerKey,
-            bookings: []
+            totalBookings: 0,
+            isTracked: false
           });
         }
 
-        const person = personsMap.get(bookerKey);
-        person.bookings.push({
-          _id: appointment._id,
-          date: appointment.date,
-          time: appointment.time,
-          attendance: appointment.attendance || 'not_set',
-          patientName: appointment.patientName,
-          patientAge: appointment.patientAge,
-          patientPhone: appointment.patientPhone,
-          createdAt: appointment.createdAt
-        });
+        const booker = bookersMap.get(bookerKey);
+        booker.totalBookings++;
       }
     });
 
     // تحويل Map إلى مصفوفة
-    const persons = Array.from(personsMap.values());
+    const bookers = Array.from(bookersMap.values());
 
     // ترتيب الأشخاص حسب عدد الحجوزات (تنازلياً)
-    persons.sort((a, b) => b.bookings.length - a.bookings.length);
+    bookers.sort((a, b) => b.totalBookings - a.totalBookings);
 
-    res.json(persons);
+    res.json(bookers);
   } catch (error) {
     console.error('خطأ في جلب الأشخاص الذين قاموا بالحجز للآخرين:', error);
     res.status(500).json({ error: 'خطأ في جلب البيانات' });
   }
 });
 
-// إضافة شخص جديد لتتبع حجوزاته للآخرين
+// جلب الأشخاص الذين يتم تتبعهم حالياً لطبيب معين
+app.get('/api/doctors/:doctorId/bookings-for-others', async (req, res) => {
+  try {
+    const { doctorId } = req.params;
+    
+    // التحقق من صحة doctorId
+    if (!doctorId || !mongoose.Types.ObjectId.isValid(doctorId)) {
+      return res.status(400).json({ error: 'معرف الطبيب غير صحيح' });
+    }
+
+    // جلب الأشخاص الذين يتم تتبعهم
+    const trackedBookers = await TrackedBookerForOther.find({ 
+      doctorId: doctorId,
+      isActive: true 
+    });
+
+    // جلب المواعيد لكل شخص يتم تتبعه
+    const personsWithBookings = await Promise.all(
+      trackedBookers.map(async (trackedBooker) => {
+        const appointments = await Appointment.find({
+          doctorId: doctorId,
+          $or: [
+            { bookerPhone: trackedBooker.bookerPhone },
+            { 'userId.phone': trackedBooker.bookerPhone }
+          ]
+        });
+
+        return {
+          _id: trackedBooker._id,
+          name: trackedBooker.bookerName,
+          phone: trackedBooker.bookerPhone,
+          isTracked: true,
+          bookings: appointments.map(appointment => ({
+            _id: appointment._id,
+            date: appointment.date,
+            time: appointment.time,
+            attendance: appointment.attendance || 'not_set',
+            patientName: appointment.patientName,
+            patientAge: appointment.patientAge,
+            patientPhone: appointment.patientPhone,
+            createdAt: appointment.createdAt
+          }))
+        };
+      })
+    );
+
+    // ترتيب الأشخاص حسب عدد الحجوزات (تنازلياً)
+    personsWithBookings.sort((a, b) => b.bookings.length - a.bookings.length);
+
+    res.json(personsWithBookings);
+  } catch (error) {
+    console.error('خطأ في جلب الأشخاص الذين يتم تتبعهم:', error);
+    res.status(500).json({ error: 'خطأ في جلب البيانات' });
+  }
+});
+
+// إضافة شخص للتتبع من قائمة الأشخاص الذين قاموا بالحجز للآخرين
 app.post('/api/doctors/:doctorId/bookings-for-others', async (req, res) => {
   try {
     const { doctorId } = req.params;
-    const { name, phone } = req.body;
+    const { bookerPhone, bookerName } = req.body;
 
     // التحقق من الحقول المطلوبة
-    if (!name || !phone) {
-      return res.status(400).json({ error: 'الاسم ورقم الهاتف مطلوبان' });
+    if (!bookerPhone || !bookerName) {
+      return res.status(400).json({ error: 'رقم الهاتف واسم الشخص مطلوبان' });
     }
 
     // التحقق من صحة doctorId
@@ -5796,12 +5858,13 @@ app.post('/api/doctors/:doctorId/bookings-for-others', async (req, res) => {
       return res.status(400).json({ error: 'معرف الطبيب غير صحيح' });
     }
 
-    // البحث عن المواعيد الموجودة لهذا الشخص مع هذا الطبيب
+    // التحقق من وجود مواعيد لهذا الشخص مع هذا الطبيب
     const existingAppointments = await Appointment.find({
       doctorId: doctorId,
+      isBookingForOther: true,
       $or: [
-        { bookerPhone: phone },
-        { 'userId.phone': phone }
+        { bookerPhone: bookerPhone },
+        { 'userId.phone': bookerPhone }
       ]
     });
 
@@ -5811,23 +5874,34 @@ app.post('/api/doctors/:doctorId/bookings-for-others', async (req, res) => {
       });
     }
 
-    // إنشاء أو تحديث الشخص في قاعدة البيانات
-    // يمكن استخدام collection منفصل أو إضافة حقل في Appointment
-    // سنقوم بتحديث المواعيد الموجودة لتسهيل التتبع
+    // إنشاء أو تحديث الشخص في قائمة التتبع
+    const trackedBooker = await TrackedBookerForOther.findOneAndUpdate(
+      { doctorId: doctorId, bookerPhone: bookerPhone },
+      { 
+        bookerName: bookerName,
+        isActive: true,
+        updatedAt: new Date()
+      },
+      { 
+        upsert: true, 
+        new: true,
+        setDefaultsOnInsert: true
+      }
+    );
 
     res.status(201).json({ 
-      message: 'تم إضافة الشخص بنجاح',
-      person: {
-        _id: phone,
-        name: name,
-        phone: phone,
+      message: 'تم إضافة الشخص للتتبع بنجاح',
+      trackedBooker: {
+        _id: trackedBooker._id,
+        bookerPhone: trackedBooker.bookerPhone,
+        bookerName: trackedBooker.bookerName,
         appointmentsCount: existingAppointments.length
       }
     });
 
   } catch (error) {
-    console.error('خطأ في إضافة الشخص:', error);
-    res.status(500).json({ error: 'خطأ في إضافة الشخص' });
+    console.error('خطأ في إضافة الشخص للتتبع:', error);
+    res.status(500).json({ error: 'خطأ في إضافة الشخص للتتبع' });
   }
 });
 
@@ -5841,38 +5915,43 @@ app.delete('/api/doctors/:doctorId/bookings-for-others/:personId', async (req, r
       return res.status(400).json({ error: 'معرف الطبيب غير صحيح' });
     }
 
-    if (!personId) {
-      return res.status(400).json({ error: 'معرف الشخص مطلوب' });
+    if (!personId || !mongoose.Types.ObjectId.isValid(personId)) {
+      return res.status(400).json({ error: 'معرف الشخص غير صحيح' });
     }
 
-    // البحث عن المواعيد المرتبطة بهذا الشخص
-    const appointments = await Appointment.find({
-      doctorId: doctorId,
-      $or: [
-        { bookerPhone: personId },
-        { 'userId.phone': personId }
-      ]
+    // البحث عن الشخص في قائمة التتبع
+    const trackedBooker = await TrackedBookerForOther.findOne({
+      _id: personId,
+      doctorId: doctorId
     });
 
-    if (appointments.length === 0) {
-      return res.status(404).json({ error: 'لم يتم العثور على الشخص' });
+    if (!trackedBooker) {
+      return res.status(404).json({ error: 'لم يتم العثور على الشخص في قائمة التتبع' });
     }
 
-    // يمكن إضافة منطق إضافي هنا حسب المتطلبات
-    // مثلاً: حذف المواعيد أو تحديث حالة التتبع
+    // إزالة الشخص من التتبع (تعطيل بدلاً من الحذف)
+    trackedBooker.isActive = false;
+    trackedBooker.updatedAt = new Date();
+    await trackedBooker.save();
 
     res.json({ 
-      message: 'تم إزالة الشخص بنجاح',
-      removedAppointmentsCount: appointments.length
+      message: 'تم إزالة الشخص من التتبع بنجاح',
+      removedBooker: {
+        _id: trackedBooker._id,
+        bookerPhone: trackedBooker.bookerPhone,
+        bookerName: trackedBooker.bookerName
+      }
     });
 
   } catch (error) {
-    console.error('خطأ في إزالة الشخص:', error);
-    res.status(500).json({ error: 'خطأ في إزالة الشخص' });
+    console.error('خطأ في إزالة الشخص من التتبع:', error);
+    res.status(500).json({ error: 'خطأ في إزالة الشخص من التتبع' });
   }
 });
 
 // ===== نهاية API endpoints لإدارة الأشخاص الذين قاموا بحجز مواعيد للآخرين =====
+
+// إضافة موعد خاص (special appointment)
 
 // ===== 404 Handler - يجب أن يكون في النهاية =====
 app.use('*', (req, res) => {
