@@ -624,6 +624,59 @@ const appointmentSchema = new mongoose.Schema({
 });
 const Appointment = mongoose.model('Appointment', appointmentSchema);
 
+// مخطط الموظفين للأطباء
+const employeeSchema = new mongoose.Schema({
+  doctorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Doctor', required: true }, // الطبيب المسؤول
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, // المستخدم المرتبط (اختياري)
+  phone: { type: String, required: true }, // رقم الهاتف العراقي
+  name: { type: String, required: true }, // اسم الموظف
+  email: String, // البريد الإلكتروني (اختياري)
+  position: { type: String, default: 'موظف' }, // المنصب
+  status: { type: String, enum: ['active', 'inactive', 'suspended'], default: 'active' }, // حالة الموظف
+  hireDate: { type: Date, default: Date.now }, // تاريخ التعيين
+  salary: Number, // الراتب
+  commission: { type: Number, default: 0 }, // العمولة
+  notes: String, // ملاحظات
+  createdAt: { type: Date, default: Date.now }
+});
+
+// إنشاء فهرس فريد للموظف لكل طبيب
+employeeSchema.index({ doctorId: 1, phone: 1 }, { unique: true });
+
+const Employee = mongoose.model('Employee', employeeSchema);
+
+// مخطط نظام النقاط
+const pointsSchema = new mongoose.Schema({
+  employeeId: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee', required: true }, // الموظف
+  doctorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Doctor', required: true }, // الطبيب
+  appointmentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Appointment' }, // الموعد المرتبط
+  points: { type: Number, required: true }, // عدد النقاط
+  type: { type: String, enum: ['appointment', 'attendance', 'bonus', 'deduction'], default: 'appointment' }, // نوع النقاط
+  description: String, // وصف النقاط
+  date: { type: Date, default: Date.now }, // تاريخ النقاط
+  week: { type: Number }, // رقم الأسبوع
+  month: { type: Number }, // رقم الشهر
+  year: { type: Number } // السنة
+});
+
+const Points = mongoose.model('Points', pointsSchema);
+
+// مخطط إحصائيات الموظفين
+const employeeStatsSchema = new mongoose.Schema({
+  employeeId: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee', required: true },
+  doctorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Doctor', required: true },
+  period: { type: String, enum: ['weekly', 'monthly', 'yearly'], required: true }, // الفترة
+  startDate: { type: Date, required: Date.now }, // تاريخ البداية
+  endDate: { type: Date, required: Date.now }, // تاريخ النهاية
+  totalAppointments: { type: Number, default: 0 }, // إجمالي المواعيد
+  attendedAppointments: { type: Number, default: 0 }, // المواعيد الحاضرة
+  totalPoints: { type: Number, default: 0 }, // إجمالي النقاط
+  averagePoints: { type: Number, default: 0 }, // متوسط النقاط
+  lastUpdated: { type: Date, default: Date.now }
+});
+
+const EmployeeStats = mongoose.model('EmployeeStats', employeeStatsSchema);
+
 // مخطط الرسائل
 const messageSchema = new mongoose.Schema({
   from: String,
@@ -2355,7 +2408,7 @@ app.put('/doctor/:id', async (req, res) => {
       }
     }
     
-    // استخدم كل الحقول المرسلة في body
+    // استخدام كل الحقول المرسلة في body
     const updateFields = { ...req.body };
     
     const doctor = await Doctor.findByIdAndUpdate(id, updateFields, { new: true });
@@ -3390,7 +3443,7 @@ app.get('/api/appointments', authenticateToken, requireUserType(['admin']), asyn
 app.put('/api/appointments/:id/status', async (req, res) => {
   try {
     const { id } = req.params;
-    const { status } = req.body;
+    const { status, employeeId } = req.body;
     
     const appointment = await Appointment.findByIdAndUpdate(
       id,
@@ -3400,6 +3453,36 @@ app.put('/api/appointments/:id/status', async (req, res) => {
     
     if (!appointment) {
       return res.status(404).json({ error: 'الموعد غير موجود' });
+    }
+    
+    // إضافة نقاط تلقائياً إذا تم تأكيد الموعد وتم تحديد موظف
+    if (status === 'confirmed' && employeeId) {
+      try {
+        // التحقق من أن الموظف موجود
+        const employee = await Employee.findById(employeeId);
+        if (employee && employee.doctorId.toString() === appointment.doctorId.toString()) {
+          // إضافة 3 نقاط للموعد المؤكد
+          const pointsRecord = new Points({
+            employeeId,
+            doctorId: appointment.doctorId,
+            appointmentId: appointment._id,
+            points: 3,
+            type: 'appointment',
+            description: `موعد مؤكد - ${appointment.patientName || appointment.userName}`,
+            date: new Date()
+          });
+          
+          await pointsRecord.save();
+          
+          // تحديث إحصائيات الموظف
+          await updateEmployeeStats(employeeId, appointment.doctorId);
+          
+          console.log(`تم إضافة 3 نقاط للموظف ${employee.name} للموعد ${appointment._id}`);
+        }
+      } catch (pointsError) {
+        console.error('خطأ في إضافة النقاط:', pointsError);
+        // لا نوقف العملية إذا فشل إضافة النقاط
+      }
     }
     
     res.json({ message: 'تم تحديث حالة الموعد بنجاح', appointment });
@@ -3412,7 +3495,7 @@ app.put('/api/appointments/:id/status', async (req, res) => {
 app.put('/api/appointments/:id/attendance', async (req, res) => {
   try {
     const { id } = req.params;
-    const { attendance } = req.body;
+    const { attendance, employeeId } = req.body;
     
     // التأكد من أن القيمة صحيحة
     if (attendance !== 'present' && attendance !== 'absent') {
@@ -3432,6 +3515,36 @@ app.put('/api/appointments/:id/attendance', async (req, res) => {
     
     if (!appointment) {
       return res.status(404).json({ error: 'الموعد غير موجود' });
+    }
+    
+    // إضافة نقاط إضافية عند الحضور إذا تم تحديد موظف
+    if (attendance === 'present' && employeeId) {
+      try {
+        // التحقق من أن الموظف موجود
+        const employee = await Employee.findById(employeeId);
+        if (employee && employee.doctorId.toString() === appointment.doctorId.toString()) {
+          // إضافة نقاط إضافية للحضور
+          const pointsRecord = new Points({
+            employeeId,
+            doctorId: appointment.doctorId,
+            appointmentId: appointment._id,
+            points: 2, // نقاط إضافية للحضور
+            type: 'attendance',
+            description: `حضور المريض - ${appointment.patientName || appointment.userName}`,
+            date: new Date()
+          });
+          
+          await pointsRecord.save();
+          
+          // تحديث إحصائيات الموظف
+          await updateEmployeeStats(employeeId, appointment.doctorId);
+          
+          console.log(`تم إضافة نقاط حضور للموظف ${employee.name} للموعد ${appointment._id}`);
+        }
+      } catch (pointsError) {
+        console.error('خطأ في إضافة نقاط الحضور:', pointsError);
+        // لا نوقف العملية إذا فشل إضافة النقاط
+      }
     }
     
     res.json({ message: 'تم تحديث حالة الحضور بنجاح', appointment });
@@ -5717,6 +5830,515 @@ app.post('/advertisements/:id/stats', async (req, res) => {
 });
 
 // ===== نهاية endpoints الإعلانات =====
+
+// ===== نظام إدارة الموظفين للأطباء =====
+
+// إضافة موظف جديد للطبيب
+app.post('/api/employees', async (req, res) => {
+  try {
+    const { doctorId, phone, name, email, position, salary, commission, notes } = req.body;
+    
+    // التحقق من الحقول المطلوبة
+    if (!doctorId || !phone || !name) {
+      return res.status(400).json({ error: 'معرف الطبيب ورقم الهاتف والاسم مطلوبة' });
+    }
+    
+    // التحقق من أن الطبيب موجود
+    const doctor = await Doctor.findById(doctorId);
+    if (!doctor) {
+      return res.status(404).json({ error: 'الطبيب غير موجود' });
+    }
+    
+    // التحقق من أن رقم الهاتف صحيح (تنسيق عراقي)
+    const iraqPhoneRegex = /^(\+964|964|0)?7[0-9]{8}$/;
+    if (!iraqPhoneRegex.test(phone)) {
+      return res.status(400).json({ error: 'رقم الهاتف يجب أن يكون بتنسيق عراقي صحيح' });
+    }
+    
+    // إنشاء الموظف
+    const employee = new Employee({
+      doctorId,
+      phone,
+      name,
+      email,
+      position: position || 'موظف',
+      salary,
+      commission: commission || 0,
+      notes
+    });
+    
+    await employee.save();
+    
+    res.status(201).json({
+      success: true,
+      message: 'تم إضافة الموظف بنجاح',
+      employee
+    });
+    
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(400).json({ error: 'هذا الموظف موجود بالفعل لهذا الطبيب' });
+    }
+    console.error('خطأ في إضافة الموظف:', error);
+    res.status(500).json({ error: 'خطأ في إضافة الموظف' });
+  }
+});
+
+// جلب جميع موظفي الطبيب
+app.get('/api/employees/:doctorId', async (req, res) => {
+  try {
+    const { doctorId } = req.params;
+    
+    const employees = await Employee.find({ doctorId, status: 'active' })
+      .populate('userId', 'first_name email')
+      .sort({ createdAt: -1 });
+    
+    res.json({
+      success: true,
+      employees
+    });
+    
+  } catch (error) {
+    console.error('خطأ في جلب الموظفين:', error);
+    res.status(500).json({ error: 'خطأ في جلب الموظفين' });
+  }
+});
+
+// تحديث بيانات الموظف
+app.put('/api/employees/:employeeId', async (req, res) => {
+  try {
+    const { employeeId } = req.params;
+    const updateData = req.body;
+    
+    // إزالة الحقول التي لا يمكن تحديثها
+    delete updateData.doctorId;
+    delete updateData.createdAt;
+    
+    const employee = await Employee.findByIdAndUpdate(
+      employeeId,
+      { ...updateData, updatedAt: new Date() },
+      { new: true }
+    );
+    
+    if (!employee) {
+      return res.status(404).json({ error: 'الموظف غير موجود' });
+    }
+    
+    res.json({
+      success: true,
+      message: 'تم تحديث بيانات الموظف بنجاح',
+      employee
+    });
+    
+  } catch (error) {
+    console.error('خطأ في تحديث الموظف:', error);
+    res.status(500).json({ error: 'خطأ في تحديث الموظف' });
+  }
+});
+
+// حذف موظف
+app.delete('/api/employees/:employeeId', async (req, res) => {
+  try {
+    const { employeeId } = req.params;
+    
+    const employee = await Employee.findByIdAndDelete(employeeId);
+    
+    if (!employee) {
+      return res.status(404).json({ error: 'الموظف غير موجود' });
+    }
+    
+    // حذف جميع النقاط المرتبطة بالموظف
+    await Points.deleteMany({ employeeId });
+    
+    // حذف الإحصائيات المرتبطة بالموظف
+    await EmployeeStats.deleteMany({ employeeId });
+    
+    res.json({
+      success: true,
+      message: 'تم حذف الموظف وجميع بياناته بنجاح'
+    });
+    
+  } catch (error) {
+    console.error('خطأ في حذف الموظف:', error);
+    res.status(500).json({ error: 'خطأ في حذف الموظف' });
+  }
+});
+
+// إضافة نقاط للموظف
+app.post('/api/employees/:employeeId/points', async (req, res) => {
+  try {
+    const { employeeId } = req.params;
+    const { points, type, description, appointmentId } = req.body;
+    
+    // التحقق من الحقول المطلوبة
+    if (!points || !type) {
+      return res.status(400).json({ error: 'عدد النقاط ونوعها مطلوبة' });
+    }
+    
+    // التحقق من أن الموظف موجود
+    const employee = await Employee.findById(employeeId);
+    if (!employee) {
+      return res.status(404).json({ error: 'الموظف غير موجود' });
+    }
+    
+    // حساب الأسبوع والشهر والسنة
+    const now = new Date();
+    const week = Math.ceil((now.getDate() + new Date(now.getFullYear(), now.getMonth(), 1).getDay()) / 7);
+    const month = now.getMonth() + 1;
+    const year = now.getFullYear();
+    
+    // إنشاء النقاط
+    const pointsRecord = new Points({
+      employeeId,
+      doctorId: employee.doctorId,
+      appointmentId,
+      points,
+      type,
+      description,
+      week,
+      month,
+      year
+    });
+    
+    await pointsRecord.save();
+    
+    // تحديث الإحصائيات
+    await updateEmployeeStats(employeeId, employee.doctorId);
+    
+    res.status(201).json({
+      success: true,
+      message: 'تم إضافة النقاط بنجاح',
+      points: pointsRecord
+    });
+    
+  } catch (error) {
+    console.error('خطأ في إضافة النقاط:', error);
+    res.status(500).json({ error: 'خطأ في إضافة النقاط' });
+  }
+});
+
+// جلب نقاط الموظف
+app.get('/api/employees/:employeeId/points', async (req, res) => {
+  try {
+    const { employeeId } = req.params;
+    const { period, startDate, endDate } = req.query;
+    
+    let query = { employeeId };
+    
+    // فلترة حسب الفترة
+    if (period === 'weekly') {
+      const now = new Date();
+      const weekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay());
+      const weekEnd = new Date(weekStart.getTime() + 7 * 24 * 60 * 60 * 1000);
+      query.date = { $gte: weekStart, $lt: weekEnd };
+    } else if (period === 'monthly') {
+      const now = new Date();
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+      query.date = { $gte: monthStart, $lt: monthEnd };
+    } else if (period === 'yearly') {
+      const now = new Date();
+      const yearStart = new Date(now.getFullYear(), 0, 1);
+      const yearEnd = new Date(now.getFullYear() + 1, 0, 1);
+      query.date = { $gte: yearStart, $lt: yearEnd };
+    } else if (startDate && endDate) {
+      query.date = { $gte: new Date(startDate), $lte: new Date(endDate) };
+    }
+    
+    const points = await Points.find(query)
+      .populate('appointmentId', 'date time userName patientName')
+      .sort({ date: -1 });
+    
+    // حساب الإجمالي
+    const totalPoints = points.reduce((sum, p) => sum + p.points, 0);
+    
+    res.json({
+      success: true,
+      points,
+      totalPoints,
+      count: points.length
+    });
+    
+  } catch (error) {
+    console.error('خطأ في جلب النقاط:', error);
+    res.status(500).json({ error: 'خطأ في جلب النقاط' });
+  }
+});
+
+// جلب إحصائيات الموظف
+app.get('/api/employees/:employeeId/stats', async (req, res) => {
+  try {
+    const { employeeId } = req.params;
+    const { period } = req.query;
+    
+    let stats;
+    
+    if (period) {
+      stats = await EmployeeStats.findOne({ 
+        employeeId, 
+        period 
+      }).sort({ lastUpdated: -1 });
+    } else {
+      // جلب جميع الإحصائيات
+      stats = await EmployeeStats.find({ employeeId })
+        .sort({ period: 1, lastUpdated: -1 });
+    }
+    
+    if (!stats || stats.length === 0) {
+      // إنشاء إحصائيات جديدة إذا لم تكن موجودة
+      await updateEmployeeStats(employeeId);
+      stats = await EmployeeStats.find({ employeeId })
+        .sort({ period: 1, lastUpdated: -1 });
+    }
+    
+    res.json({
+      success: true,
+      stats
+    });
+    
+  } catch (error) {
+    console.error('خطأ في جلب الإحصائيات:', error);
+    res.status(500).json({ error: 'خطأ في جلب الإحصائيات' });
+  }
+});
+
+// ربط موظف بمستخدم موجود (عن طريق رقم الهاتف)
+app.post('/api/employees/:employeeId/link-user', async (req, res) => {
+  try {
+    const { employeeId } = req.params;
+    const { phone } = req.body;
+    
+    if (!phone) {
+      return res.status(400).json({ error: 'رقم الهاتف مطلوب' });
+    }
+    
+    // البحث عن المستخدم برقم الهاتف
+    const user = await User.findOne({ phone });
+    if (!user) {
+      return res.status(404).json({ error: 'لم يتم العثور على مستخدم بهذا الرقم' });
+    }
+    
+    // تحديث الموظف
+    const employee = await Employee.findByIdAndUpdate(
+      employeeId,
+      { userId: user._id },
+      { new: true }
+    );
+    
+    if (!employee) {
+      return res.status(404).json({ error: 'الموظف غير موجود' });
+    }
+    
+    res.json({
+      success: true,
+      message: 'تم ربط الموظف بالمستخدم بنجاح',
+      employee
+    });
+    
+  } catch (error) {
+    console.error('خطأ في ربط الموظف:', error);
+    res.status(500).json({ error: 'خطأ في ربط الموظف' });
+  }
+});
+
+// البحث عن موظف برقم الهاتف
+app.get('/api/employees/search/:phone', async (req, res) => {
+  try {
+    const { phone } = req.params;
+    const { doctorId } = req.query;
+    
+    if (!phone) {
+      return res.status(400).json({ error: 'رقم الهاتف مطلوب' });
+    }
+    
+    let query = { phone };
+    if (doctorId) {
+      query.doctorId = doctorId;
+    }
+    
+    const employee = await Employee.findOne(query)
+      .populate('userId', 'first_name email')
+      .populate('doctorId', 'name specialty');
+    
+    if (!employee) {
+      return res.status(404).json({ error: 'لم يتم العثور على موظف بهذا الرقم' });
+    }
+    
+    res.json({
+      success: true,
+      employee
+    });
+    
+  } catch (error) {
+    console.error('خطأ في البحث عن الموظف:', error);
+    res.status(500).json({ error: 'خطأ في البحث عن الموظف' });
+  }
+});
+
+// جلب إحصائيات موظفين الطبيب
+app.get('/api/doctors/:doctorId/employees-stats', async (req, res) => {
+  try {
+    const { doctorId } = req.params;
+    const { period } = req.query;
+    
+    // جلب جميع موظفي الطبيب
+    const employees = await Employee.find({ doctorId, status: 'active' });
+    
+    if (employees.length === 0) {
+      return res.json({
+        success: true,
+        employees: [],
+        totalStats: {
+          totalEmployees: 0,
+          totalPoints: 0,
+          totalAppointments: 0,
+          averagePoints: 0
+        }
+      });
+    }
+    
+    // جلب إحصائيات كل موظف
+    const employeesWithStats = await Promise.all(
+      employees.map(async (employee) => {
+        let stats;
+        if (period) {
+          stats = await EmployeeStats.findOne({ 
+            employeeId: employee._id, 
+            period 
+          });
+        } else {
+          // جلب الإحصائيات الأسبوعية كافتراضي
+          stats = await EmployeeStats.findOne({ 
+            employeeId: employee._id, 
+            period: 'weekly' 
+          });
+        }
+        
+        return {
+          ...employee.toObject(),
+          stats: stats || {
+            totalAppointments: 0,
+            attendedAppointments: 0,
+            totalPoints: 0,
+            averagePoints: 0
+          }
+        };
+      })
+    );
+    
+    // حساب الإحصائيات الإجمالية
+    const totalStats = employeesWithStats.reduce((acc, emp) => {
+      acc.totalPoints += emp.stats.totalPoints || 0;
+      acc.totalAppointments += emp.stats.totalAppointments || 0;
+      return acc;
+    }, { totalPoints: 0, totalAppointments: 0 });
+    
+    totalStats.totalEmployees = employeesWithStats.length;
+    totalStats.averagePoints = totalStats.totalEmployees > 0 
+      ? Math.round((totalStats.totalPoints / totalStats.totalEmployees) * 100) / 100 
+      : 0;
+    
+    res.json({
+      success: true,
+      employees: employeesWithStats,
+      totalStats
+    });
+    
+  } catch (error) {
+    console.error('خطأ في جلب إحصائيات الموظفين:', error);
+    res.status(500).json({ error: 'خطأ في جلب إحصائيات الموظفين' });
+  }
+});
+
+// دالة تحديث إحصائيات الموظف
+async function updateEmployeeStats(employeeId, doctorId = null) {
+  try {
+    if (!doctorId) {
+      const employee = await Employee.findById(employeeId);
+      if (!employee) return;
+      doctorId = employee.doctorId;
+    }
+    
+    const now = new Date();
+    
+    // تحديث الإحصائيات الأسبوعية
+    const weekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay());
+    const weekEnd = new Date(weekStart.getTime() + 7 * 24 * 60 * 60 * 1000);
+    
+    const weeklyStats = await calculateEmployeeStats(employeeId, doctorId, 'weekly', weekStart, weekEnd);
+    await EmployeeStats.findOneAndUpdate(
+      { employeeId, period: 'weekly' },
+      weeklyStats,
+      { upsert: true, new: true }
+    );
+    
+    // تحديث الإحصائيات الشهرية
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    
+    const monthlyStats = await calculateEmployeeStats(employeeId, doctorId, 'monthly', monthStart, monthEnd);
+    await EmployeeStats.findOneAndUpdate(
+      { employeeId, period: 'monthly' },
+      monthlyStats,
+      { upsert: true, new: true }
+    );
+    
+    // تحديث الإحصائيات السنوية
+    const yearStart = new Date(now.getFullYear(), 0, 1);
+    const yearEnd = new Date(now.getFullYear() + 1, 0, 1);
+    
+    const yearlyStats = await calculateEmployeeStats(employeeId, doctorId, 'yearly', yearStart, yearEnd);
+    await EmployeeStats.findOneAndUpdate(
+      { employeeId, period: 'yearly' },
+      yearlyStats,
+      { upsert: true, new: true }
+    );
+    
+  } catch (error) {
+    console.error('خطأ في تحديث إحصائيات الموظف:', error);
+  }
+}
+
+// دالة حساب إحصائيات الموظف
+async function calculateEmployeeStats(employeeId, doctorId, period, startDate, endDate) {
+  try {
+    // جلب النقاط في الفترة المحددة
+    const points = await Points.find({
+      employeeId,
+      date: { $gte: startDate, $lt: endDate }
+    });
+    
+    // جلب المواعيد المرتبطة
+    const appointments = await Appointment.find({
+      doctorId,
+      date: { $gte: startDate.toISOString().split('T')[0], $lt: endDate.toISOString().split('T')[0] }
+    });
+    
+    const totalPoints = points.reduce((sum, p) => sum + p.points, 0);
+    const totalAppointments = appointments.length;
+    const attendedAppointments = appointments.filter(a => a.attendance === 'present').length;
+    const averagePoints = totalPoints / Math.max(totalAppointments, 1);
+    
+    return {
+      employeeId,
+      doctorId,
+      period,
+      startDate,
+      endDate,
+      totalAppointments,
+      attendedAppointments,
+      totalPoints,
+      averagePoints: Math.round(averagePoints * 100) / 100,
+      lastUpdated: new Date()
+    };
+    
+  } catch (error) {
+    console.error('خطأ في حساب الإحصائيات:', error);
+    return null;
+  }
+}
+
+// ===== نهاية نظام إدارة الموظفين =====
 
 // إضافة موعد خاص (special appointment)
 
