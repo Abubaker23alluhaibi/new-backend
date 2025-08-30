@@ -5808,15 +5808,20 @@ app.get('/api/doctors/:doctorId/bookings-for-others', async (req, res) => {
       trackedBookers.map(async (trackedBooker) => {
         const appointments = await Appointment.find({
           doctorId: doctorId,
-          'userId.phone': trackedBooker.bookerPhone
-        });
+          isBookingForOther: true
+        }).populate('userId', 'phone first_name');
+
+        // تصفية المواعيد حسب رقم هاتف المستخدم الذي قام بالحجز
+        const filteredAppointments = appointments.filter(appointment => 
+          appointment.userId?.phone === trackedBooker.bookerPhone
+        );
 
         return {
           _id: trackedBooker._id,
           name: trackedBooker.bookerName,
           phone: trackedBooker.bookerPhone,
           isTracked: true,
-          bookings: appointments.map(appointment => ({
+          bookings: filteredAppointments.map(appointment => ({
             _id: appointment._id,
             date: appointment.date,
             time: appointment.time,
@@ -5859,11 +5864,15 @@ app.post('/api/doctors/:doctorId/bookings-for-others', async (req, res) => {
     // التحقق من وجود مواعيد لهذا الشخص مع هذا الطبيب
     const existingAppointments = await Appointment.find({
       doctorId: doctorId,
-      isBookingForOther: true,
-      'userId.phone': bookerPhone
-    });
+      isBookingForOther: true
+    }).populate('userId', 'phone first_name');
 
-    if (existingAppointments.length === 0) {
+    // تصفية المواعيد حسب رقم هاتف المستخدم الذي قام بالحجز
+    const filteredAppointments = existingAppointments.filter(appointment => 
+      appointment.userId?.phone === bookerPhone
+    );
+
+    if (filteredAppointments.length === 0) {
       return res.status(400).json({ 
         error: 'لم يتم العثور على أي مواعيد لهذا الشخص مع هذا الطبيب' 
       });
@@ -5890,7 +5899,7 @@ app.post('/api/doctors/:doctorId/bookings-for-others', async (req, res) => {
         _id: trackedBooker._id,
         bookerPhone: trackedBooker.bookerPhone,
         bookerName: trackedBooker.bookerName,
-        appointmentsCount: existingAppointments.length
+        appointmentsCount: filteredAppointments.length
       }
     });
 
