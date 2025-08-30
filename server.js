@@ -5755,7 +5755,8 @@ app.get('/api/doctors/:doctorId/all-other-bookers', async (req, res) => {
     const bookersMap = new Map();
 
     appointments.forEach(appointment => {
-      const bookerKey = appointment.bookerPhone || appointment.userId?.phone;
+      // استخدام رقم هاتف المستخدم الذي قام بالحجز
+      const bookerKey = appointment.userId?.phone;
       
       if (bookerKey) {
         if (!bookersMap.has(bookerKey)) {
@@ -5807,10 +5808,7 @@ app.get('/api/doctors/:doctorId/bookings-for-others', async (req, res) => {
       trackedBookers.map(async (trackedBooker) => {
         const appointments = await Appointment.find({
           doctorId: doctorId,
-          $or: [
-            { bookerPhone: trackedBooker.bookerPhone },
-            { 'userId.phone': trackedBooker.bookerPhone }
-          ]
+          'userId.phone': trackedBooker.bookerPhone
         });
 
         return {
@@ -5862,10 +5860,7 @@ app.post('/api/doctors/:doctorId/bookings-for-others', async (req, res) => {
     const existingAppointments = await Appointment.find({
       doctorId: doctorId,
       isBookingForOther: true,
-      $or: [
-        { bookerPhone: bookerPhone },
-        { 'userId.phone': bookerPhone }
-      ]
+      'userId.phone': bookerPhone
     });
 
     if (existingAppointments.length === 0) {
