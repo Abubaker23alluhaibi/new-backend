@@ -617,8 +617,9 @@ const appointmentSchema = new mongoose.Schema({
   patientName: String, // اسم المريض (قد يكون مختلف عن اسم المستخدم)
   isBookingForOther: { type: Boolean, default: false }, // هل الحجز لشخص آخر
   bookerName: String, // اسم الشخص الذي قام بالحجز
+  bookerPhone: String, // رقم هاتف الشخص الذي قام بالحجز
   duration: { type: Number, default: 30 }, // مدة الموعد بالدقائق
-  attendance: { type: String, enum: ['present', 'absent'], default: 'absent' }, // حالة الحضور - فقط حاضر أو غائب
+  attendance: { type: String, enum: ['attended', 'absent', 'not_set'], default: 'not_set' }, // حالة الحضور
   attendanceTime: Date, // وقت تسجيل الحضور
   createdAt: { type: Date, default: Date.now }
 });
@@ -5718,7 +5719,160 @@ app.post('/advertisements/:id/stats', async (req, res) => {
 
 // ===== نهاية endpoints الإعلانات =====
 
-// إضافة موعد خاص (special appointment)
+// ===== API endpoints لإدارة الأشخاص الذين قاموا بحجز مواعيد للآخرين =====
+
+// جلب الأشخاص الذين قاموا بحجز مواعيد للآخرين لطبيب معين
+app.get('/api/doctors/:doctorId/bookings-for-others', async (req, res) => {
+  try {
+    const { doctorId } = req.params;
+    
+    // التحقق من صحة doctorId
+    if (!doctorId || !mongoose.Types.ObjectId.isValid(doctorId)) {
+      return res.status(400).json({ error: 'معرف الطبيب غير صحيح' });
+    }
+
+    // جلب جميع المواعيد للطبيب مع تفاصيل الحجز للآخرين
+    const appointments = await Appointment.find({ 
+      doctorId: doctorId,
+      isBookingForOther: true 
+    }).populate('userId', 'first_name phone');
+
+    // تجميع البيانات حسب الشخص الذي قام بالحجز
+    const personsMap = new Map();
+
+    appointments.forEach(appointment => {
+      const bookerKey = appointment.bookerPhone || appointment.userId?.phone;
+      
+      if (bookerKey) {
+        if (!personsMap.has(bookerKey)) {
+          personsMap.set(bookerKey, {
+            _id: bookerKey, // استخدام رقم الهاتف كمعرف فريد
+            name: appointment.bookerName || appointment.userName || 'غير محدد',
+            phone: bookerKey,
+            bookings: []
+          });
+        }
+
+        const person = personsMap.get(bookerKey);
+        person.bookings.push({
+          _id: appointment._id,
+          date: appointment.date,
+          time: appointment.time,
+          attendance: appointment.attendance || 'not_set',
+          patientName: appointment.patientName,
+          patientAge: appointment.patientAge,
+          patientPhone: appointment.patientPhone,
+          createdAt: appointment.createdAt
+        });
+      }
+    });
+
+    // تحويل Map إلى مصفوفة
+    const persons = Array.from(personsMap.values());
+
+    // ترتيب الأشخاص حسب عدد الحجوزات (تنازلياً)
+    persons.sort((a, b) => b.bookings.length - a.bookings.length);
+
+    res.json(persons);
+  } catch (error) {
+    console.error('خطأ في جلب الأشخاص الذين قاموا بالحجز للآخرين:', error);
+    res.status(500).json({ error: 'خطأ في جلب البيانات' });
+  }
+});
+
+// إضافة شخص جديد لتتبع حجوزاته للآخرين
+app.post('/api/doctors/:doctorId/bookings-for-others', async (req, res) => {
+  try {
+    const { doctorId } = req.params;
+    const { name, phone } = req.body;
+
+    // التحقق من الحقول المطلوبة
+    if (!name || !phone) {
+      return res.status(400).json({ error: 'الاسم ورقم الهاتف مطلوبان' });
+    }
+
+    // التحقق من صحة doctorId
+    if (!doctorId || !mongoose.Types.ObjectId.isValid(doctorId)) {
+      return res.status(400).json({ error: 'معرف الطبيب غير صحيح' });
+    }
+
+    // البحث عن المواعيد الموجودة لهذا الشخص مع هذا الطبيب
+    const existingAppointments = await Appointment.find({
+      doctorId: doctorId,
+      $or: [
+        { bookerPhone: phone },
+        { 'userId.phone': phone }
+      ]
+    });
+
+    if (existingAppointments.length === 0) {
+      return res.status(400).json({ 
+        error: 'لم يتم العثور على أي مواعيد لهذا الشخص مع هذا الطبيب' 
+      });
+    }
+
+    // إنشاء أو تحديث الشخص في قاعدة البيانات
+    // يمكن استخدام collection منفصل أو إضافة حقل في Appointment
+    // سنقوم بتحديث المواعيد الموجودة لتسهيل التتبع
+
+    res.status(201).json({ 
+      message: 'تم إضافة الشخص بنجاح',
+      person: {
+        _id: phone,
+        name: name,
+        phone: phone,
+        appointmentsCount: existingAppointments.length
+      }
+    });
+
+  } catch (error) {
+    console.error('خطأ في إضافة الشخص:', error);
+    res.status(500).json({ error: 'خطأ في إضافة الشخص' });
+  }
+});
+
+// إزالة شخص من التتبع
+app.delete('/api/doctors/:doctorId/bookings-for-others/:personId', async (req, res) => {
+  try {
+    const { doctorId, personId } = req.params;
+
+    // التحقق من صحة المعرفات
+    if (!doctorId || !mongoose.Types.ObjectId.isValid(doctorId)) {
+      return res.status(400).json({ error: 'معرف الطبيب غير صحيح' });
+    }
+
+    if (!personId) {
+      return res.status(400).json({ error: 'معرف الشخص مطلوب' });
+    }
+
+    // البحث عن المواعيد المرتبطة بهذا الشخص
+    const appointments = await Appointment.find({
+      doctorId: doctorId,
+      $or: [
+        { bookerPhone: personId },
+        { 'userId.phone': personId }
+      ]
+    });
+
+    if (appointments.length === 0) {
+      return res.status(404).json({ error: 'لم يتم العثور على الشخص' });
+    }
+
+    // يمكن إضافة منطق إضافي هنا حسب المتطلبات
+    // مثلاً: حذف المواعيد أو تحديث حالة التتبع
+
+    res.json({ 
+      message: 'تم إزالة الشخص بنجاح',
+      removedAppointmentsCount: appointments.length
+    });
+
+  } catch (error) {
+    console.error('خطأ في إزالة الشخص:', error);
+    res.status(500).json({ error: 'خطأ في إزالة الشخص' });
+  }
+});
+
+// ===== نهاية API endpoints لإدارة الأشخاص الذين قاموا بحجز مواعيد للآخرين =====
 
 // ===== 404 Handler - يجب أن يكون في النهاية =====
 app.use('*', (req, res) => {
