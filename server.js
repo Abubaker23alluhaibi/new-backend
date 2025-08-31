@@ -4305,28 +4305,28 @@ app.delete('/admins/:id', async (req, res) => {
 const employeeSchema = new mongoose.Schema({
   doctorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Doctor', required: true },
   name: { type: String, required: true },
-  email: { type: String, required: true },
-  phone: { type: String, required: true },
   employeeType: { 
     type: String, 
     enum: ['secretary', 'assistant', 'employee'], 
     default: 'secretary' 
   },
   accessCode: { type: String, required: true, minlength: 6, maxlength: 6 },
-  permissions: {
-    VIEW_APPOINTMENTS: { type: Boolean, default: true },
-    MANAGE_APPOINTMENTS: { type: Boolean, default: false },
-    VIEW_PATIENT_INFO: { type: Boolean, default: true },
-    MANAGE_WORK_TIMES: { type: Boolean, default: false },
-    VIEW_NOTIFICATIONS: { type: Boolean, default: true },
-    MANAGE_BASIC_PROFILE: { type: Boolean, default: false },
-    VIEW_ANALYTICS: { type: Boolean, default: false },
-    MANAGE_ADVERTISEMENTS: { type: Boolean, default: false }
-  },
+          permissions: {
+          VIEW_APPOINTMENTS: { type: Boolean, default: true },
+          MANAGE_APPOINTMENTS: { type: Boolean, default: false },
+          VIEW_CALENDAR: { type: Boolean, default: true },
+          MANAGE_WORK_TIMES: { type: Boolean, default: false },
+          VIEW_ANALYTICS: { type: Boolean, default: false },
+          VIEW_PROFILE: { type: Boolean, default: true },
+          MANAGE_EMPLOYEES: { type: Boolean, default: false },
+          MANAGE_SPECIAL_APPOINTMENTS: { type: Boolean, default: false },
+          MANAGE_APPOINTMENT_DURATION: { type: Boolean, default: false },
+          VIEW_BOOKINGS_STATS: { type: Boolean, default: false }
+        },
   isActive: { type: Boolean, default: true },
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now }
-});
+ });
 
 // تعريف سكيم DoctorAccessCode لرمز دخول الدكتور
 const doctorAccessCodeSchema = new mongoose.Schema({
@@ -4378,21 +4378,12 @@ app.get('/employees/:doctorId', async (req, res) => {
 // إضافة موظف جديد
 app.post('/employees', async (req, res) => {
   try {
-    const { doctorId, name, email, phone, employeeType, permissions } = req.body;
+    const { doctorId, name, employeeType, permissions } = req.body;
     
     // التحقق من وجود الدكتور
     const doctor = await Doctor.findById(doctorId);
     if (!doctor) {
       return res.status(404).json({ error: 'الدكتور غير موجود' });
-    }
-    
-    // التحقق من عدم تكرار الإيميل
-    const existingEmployee = await Employee.findOne({ 
-      doctorId, 
-      email: { $regex: new RegExp(`^${email}$`, 'i') } 
-    });
-    if (existingEmployee) {
-      return res.status(400).json({ error: 'البريد الإلكتروني مستخدم مسبقًا' });
     }
     
     // إنشاء رمز دخول عشوائي
@@ -4401,8 +4392,6 @@ app.post('/employees', async (req, res) => {
     const employee = new Employee({
       doctorId,
       name,
-      email,
-      phone,
       employeeType,
       accessCode,
       permissions: permissions || {}
@@ -4534,18 +4523,19 @@ app.post('/verify-doctor-code', async (req, res) => {
       return res.status(401).json({ error: 'رمز الدخول غير صحيح' });
     }
     
-    // إرجاع صلاحيات كاملة للدكتور
-    const permissions = {
-      VIEW_APPOINTMENTS: true,
-      MANAGE_APPOINTMENTS: true,
-      VIEW_PATIENT_INFO: true,
-      MANAGE_WORK_TIMES: true,
-      VIEW_NOTIFICATIONS: true,
-      MANAGE_BASIC_PROFILE: true,
-      VIEW_ANALYTICS: true,
-      MANAGE_ADVERTISEMENTS: true,
-      MANAGE_EMPLOYEES: true
-    };
+            // إرجاع صلاحيات كاملة للدكتور
+        const permissions = {
+          VIEW_APPOINTMENTS: true,
+          MANAGE_APPOINTMENTS: true,
+          VIEW_CALENDAR: true,
+          MANAGE_WORK_TIMES: true,
+          VIEW_ANALYTICS: true,
+          VIEW_PROFILE: true,
+          MANAGE_EMPLOYEES: true,
+          MANAGE_SPECIAL_APPOINTMENTS: true,
+          MANAGE_APPOINTMENT_DURATION: true,
+          VIEW_BOOKINGS_STATS: true
+        };
     
     res.json({ 
       success: true, 
@@ -4581,9 +4571,7 @@ app.post('/verify-employee-code', async (req, res) => {
       userType: employee.employeeType,
       employeeInfo: {
         id: employee._id,
-        name: employee.name,
-        email: employee.email,
-        phone: employee.phone
+        name: employee.name
       }
     });
   } catch (error) {
