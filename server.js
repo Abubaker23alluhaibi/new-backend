@@ -4301,6 +4301,44 @@ app.delete('/admins/:id', async (req, res) => {
   }
 });
 
+// تعريف سكيم Employee لإدارة موظفي الدكتور
+const employeeSchema = new mongoose.Schema({
+  doctorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Doctor', required: true },
+  name: { type: String, required: true },
+  email: { type: String, required: true },
+  phone: { type: String, required: true },
+  employeeType: { 
+    type: String, 
+    enum: ['secretary', 'assistant', 'employee'], 
+    default: 'secretary' 
+  },
+  accessCode: { type: String, required: true, minlength: 6, maxlength: 6 },
+  permissions: {
+    VIEW_APPOINTMENTS: { type: Boolean, default: true },
+    MANAGE_APPOINTMENTS: { type: Boolean, default: false },
+    VIEW_PATIENT_INFO: { type: Boolean, default: true },
+    MANAGE_WORK_TIMES: { type: Boolean, default: false },
+    VIEW_NOTIFICATIONS: { type: Boolean, default: true },
+    MANAGE_BASIC_PROFILE: { type: Boolean, default: false },
+    VIEW_ANALYTICS: { type: Boolean, default: false },
+    MANAGE_ADVERTISEMENTS: { type: Boolean, default: false }
+  },
+  isActive: { type: Boolean, default: true },
+  createdAt: { type: Date, default: Date.now },
+  updatedAt: { type: Date, default: Date.now }
+});
+
+// تعريف سكيم DoctorAccessCode لرمز دخول الدكتور
+const doctorAccessCodeSchema = new mongoose.Schema({
+  doctorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Doctor', required: true, unique: true },
+  accessCode: { type: String, required: true, minlength: 6, maxlength: 6 },
+  createdAt: { type: Date, default: Date.now },
+  updatedAt: { type: Date, default: Date.now }
+});
+
+const Employee = mongoose.models.Employee || mongoose.model('Employee', employeeSchema);
+const DoctorAccessCode = mongoose.models.DoctorAccessCode || mongoose.model('DoctorAccessCode', doctorAccessCodeSchema);
+
 // تعريف سكيم MedicineReminder إذا لم يكن معرف مسبقاً
 const medicineReminderSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
@@ -4312,6 +4350,301 @@ const medicineReminderSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 const MedicineReminder = mongoose.models.MedicineReminder || mongoose.model('MedicineReminder', medicineReminderSchema);
+
+// ===== نقاط نهائية إدارة الموظفين =====
+
+// دالة إنشاء رمز دخول عشوائي
+const generateAccessCode = () => {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let result = '';
+  for (let i = 0; i < 6; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+};
+
+// جلب موظفي الدكتور
+app.get('/employees/:doctorId', async (req, res) => {
+  try {
+    const { doctorId } = req.params;
+    const employees = await Employee.find({ doctorId, isActive: true });
+    res.json(employees);
+  } catch (error) {
+    console.error('خطأ في جلب الموظفين:', error);
+    res.status(500).json({ error: 'حدث خطأ في جلب الموظفين' });
+  }
+});
+
+// إضافة موظف جديد
+app.post('/employees', async (req, res) => {
+  try {
+    const { doctorId, name, email, phone, employeeType, permissions } = req.body;
+    
+    // التحقق من وجود الدكتور
+    const doctor = await Doctor.findById(doctorId);
+    if (!doctor) {
+      return res.status(404).json({ error: 'الدكتور غير موجود' });
+    }
+    
+    // التحقق من عدم تكرار الإيميل
+    const existingEmployee = await Employee.findOne({ 
+      doctorId, 
+      email: { $regex: new RegExp(`^${email}$`, 'i') } 
+    });
+    if (existingEmployee) {
+      return res.status(400).json({ error: 'البريد الإلكتروني مستخدم مسبقًا' });
+    }
+    
+    // إنشاء رمز دخول عشوائي
+    const accessCode = generateAccessCode();
+    
+    const employee = new Employee({
+      doctorId,
+      name,
+      email,
+      phone,
+      employeeType,
+      accessCode,
+      permissions: permissions || {}
+    });
+    
+    await employee.save();
+    
+    // إرسال الرمز مع الاستجابة
+    res.json({ 
+      success: true, 
+      employee: { ...employee.toObject(), accessCode },
+      message: `تم إضافة الموظف بنجاح! رمز الدخول: ${accessCode}`
+    });
+  } catch (error) {
+    console.error('خطأ في إضافة الموظف:', error);
+    res.status(500).json({ error: 'حدث خطأ في إضافة الموظف' });
+  }
+});
+
+// تحديث صلاحيات الموظف
+app.put('/employees/:employeeId/permissions', async (req, res) => {
+  try {
+    const { employeeId } = req.params;
+    const { permissions } = req.body;
+    
+    const employee = await Employee.findByIdAndUpdate(
+      employeeId,
+      { 
+        permissions,
+        updatedAt: new Date()
+      },
+      { new: true }
+    );
+    
+    if (!employee) {
+      return res.status(404).json({ error: 'الموظف غير موجود' });
+    }
+    
+    res.json({ success: true, employee });
+  } catch (error) {
+    console.error('خطأ في تحديث الصلاحيات:', error);
+    res.status(500).json({ error: 'حدث خطأ في تحديث الصلاحيات' });
+  }
+});
+
+// تفعيل/إلغاء تفعيل الموظف
+app.put('/employees/:employeeId/toggle', async (req, res) => {
+  try {
+    const { employeeId } = req.params;
+    
+    const employee = await Employee.findById(employeeId);
+    if (!employee) {
+      return res.status(404).json({ error: 'الموظف غير موجود' });
+    }
+    
+    employee.isActive = !employee.isActive;
+    employee.updatedAt = new Date();
+    await employee.save();
+    
+    res.json({ 
+      success: true, 
+      employee,
+      message: employee.isActive ? 'تم تفعيل الموظف' : 'تم إلغاء تفعيل الموظف'
+    });
+  } catch (error) {
+    console.error('خطأ في تغيير حالة الموظف:', error);
+    res.status(500).json({ error: 'حدث خطأ في تغيير حالة الموظف' });
+  }
+});
+
+// حذف موظف
+app.delete('/employees/:employeeId', async (req, res) => {
+  try {
+    const { employeeId } = req.params;
+    
+    const employee = await Employee.findByIdAndDelete(employeeId);
+    if (!employee) {
+      return res.status(404).json({ error: 'الموظف غير موجود' });
+    }
+    
+    res.json({ success: true, message: 'تم حذف الموظف بنجاح' });
+  } catch (error) {
+    console.error('خطأ في حذف الموظف:', error);
+    res.status(500).json({ error: 'حدث خطأ في حذف الموظف' });
+  }
+});
+
+// إعادة إنشاء رمز دخول الموظف
+app.put('/employees/:employeeId/access-code', async (req, res) => {
+  try {
+    const { employeeId } = req.params;
+    
+    const employee = await Employee.findById(employeeId);
+    if (!employee) {
+      return res.status(404).json({ error: 'الموظف غير موجود' });
+    }
+    
+    const newAccessCode = generateAccessCode();
+    employee.accessCode = newAccessCode;
+    employee.updatedAt = new Date();
+    await employee.save();
+    
+    res.json({ 
+      success: true, 
+      accessCode: newAccessCode,
+      message: `تم إعادة إنشاء رمز الدخول: ${newAccessCode}`
+    });
+  } catch (error) {
+    console.error('خطأ في إعادة إنشاء الرمز:', error);
+    res.status(500).json({ error: 'حدث خطأ في إعادة إنشاء الرمز' });
+  }
+});
+
+// ===== نقاط نهائية التحقق من رموز الدخول =====
+
+// التحقق من رمز دخول الدكتور
+app.post('/verify-doctor-code', async (req, res) => {
+  try {
+    const { doctorId, accessCode } = req.body;
+    
+    // البحث عن رمز الدكتور
+    const doctorAccess = await DoctorAccessCode.findOne({ doctorId });
+    
+    if (!doctorAccess) {
+      return res.status(404).json({ error: 'لم يتم إعداد رمز دخول للدكتور' });
+    }
+    
+    if (doctorAccess.accessCode !== accessCode) {
+      return res.status(401).json({ error: 'رمز الدخول غير صحيح' });
+    }
+    
+    // إرجاع صلاحيات كاملة للدكتور
+    const permissions = {
+      VIEW_APPOINTMENTS: true,
+      MANAGE_APPOINTMENTS: true,
+      VIEW_PATIENT_INFO: true,
+      MANAGE_WORK_TIMES: true,
+      VIEW_NOTIFICATIONS: true,
+      MANAGE_BASIC_PROFILE: true,
+      VIEW_ANALYTICS: true,
+      MANAGE_ADVERTISEMENTS: true,
+      MANAGE_EMPLOYEES: true
+    };
+    
+    res.json({ 
+      success: true, 
+      permissions,
+      userType: 'doctor'
+    });
+  } catch (error) {
+    console.error('خطأ في التحقق من رمز الدكتور:', error);
+    res.status(500).json({ error: 'حدث خطأ في التحقق من الرمز' });
+  }
+});
+
+// التحقق من رمز دخول الموظف
+app.post('/verify-employee-code', async (req, res) => {
+  try {
+    const { doctorId, employeeType, accessCode } = req.body;
+    
+    // البحث عن الموظف
+    const employee = await Employee.findOne({ 
+      doctorId, 
+      employeeType,
+      accessCode,
+      isActive: true
+    });
+    
+    if (!employee) {
+      return res.status(401).json({ error: 'رمز الدخول غير صحيح أو الموظف غير مفعل' });
+    }
+    
+    res.json({ 
+      success: true, 
+      permissions: employee.permissions,
+      userType: employee.employeeType,
+      employeeInfo: {
+        id: employee._id,
+        name: employee.name,
+        email: employee.email,
+        phone: employee.phone
+      }
+    });
+  } catch (error) {
+    console.error('خطأ في التحقق من رمز الموظف:', error);
+    res.status(500).json({ error: 'حدث خطأ في التحقق من الرمز' });
+  }
+});
+
+// إعداد رمز دخول للدكتور
+app.post('/setup-doctor-access-code', async (req, res) => {
+  try {
+    const { doctorId, accessCode } = req.body;
+    
+    // التحقق من وجود الدكتور
+    const doctor = await Doctor.findById(doctorId);
+    if (!doctor) {
+      return res.status(404).json({ error: 'الدكتور غير موجود' });
+    }
+    
+    // التحقق من عدم وجود رمز مسبق
+    const existingAccess = await DoctorAccessCode.findOne({ doctorId });
+    if (existingAccess) {
+      return res.status(400).json({ error: 'تم إعداد رمز دخول للدكتور مسبقًا' });
+    }
+    
+    const doctorAccess = new DoctorAccessCode({
+      doctorId,
+      accessCode
+    });
+    
+    await doctorAccess.save();
+    
+    res.json({ 
+      success: true, 
+      message: 'تم إعداد رمز دخول للدكتور بنجاح'
+    });
+  } catch (error) {
+    console.error('خطأ في إعداد رمز الدكتور:', error);
+    res.status(500).json({ error: 'حدث خطأ في إعداد الرمز' });
+  }
+});
+
+// التحقق من وجود موظفين للدكتور
+app.get('/doctor-has-employees/:doctorId', async (req, res) => {
+  try {
+    const { doctorId } = req.params;
+    
+    const employeeCount = await Employee.countDocuments({ 
+      doctorId, 
+      isActive: true 
+    });
+    
+    res.json({ 
+      hasEmployees: employeeCount > 0,
+      employeeCount
+    });
+  } catch (error) {
+    console.error('خطأ في التحقق من وجود موظفين:', error);
+    res.status(500).json({ error: 'حدث خطأ في التحقق من وجود موظفين' });
+  }
+});
 
 // إضافة تذكير دواء جديد
 app.post('/medicine-reminders', async (req, res) => {
