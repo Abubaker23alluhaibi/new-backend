@@ -1,0 +1,27 @@
+[build]
+builder = "nixpacks"
+
+[deploy]
+startCommand = "npm start"
+healthcheckPath = "/"
+healthcheckTimeout = 30
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3
+
+# ⚠️ لا تضع المتغيرات الحساسة هنا!
+# استخدم Railway Environment Variables بدلاً من ذلك
+
+# مثال للمتغيرات (لا تضع القيم الحقيقية):
+# [environments.production.variables]
+# NODE_ENV = "production"
+# PORT = "10000"
+# MONGO_URI = "your_mongodb_connection_string"
+# JWT_SECRET = "your_jwt_secret"
+# CORS_ORIGIN = "your_frontend_domain"
+# API_URL = "your_backend_domain"
+# CLOUDINARY_URL = "your_cloudinary_url"
+# CLOUDINARY_CLOUD_NAME = "your_cloud_name"
+# CLOUDINARY_API_KEY = "your_api_key"
+# CLOUDINARY_API_SECRET = "your_api_secret"
+# MAX_FILE_SIZE = "5242880"
+# UPLOAD_PATH = "./uploads"
