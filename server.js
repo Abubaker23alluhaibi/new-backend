@@ -7056,7 +7056,9 @@ app.get('/doctors/me/patients/:patientId', authenticateToken, requireUserType(['
 // إحصائيات مرضى الطبيب الحالي
 app.get('/doctors/me/patients/stats', authenticateToken, requireUserType(['doctor']), async (req, res) => {
   try {
+    console.log('🔍 patients/stats - req.user:', req.user);
     const doctorId = req.user._id;
+    console.log('🔍 patients/stats - doctorId:', doctorId);
 
     const stats = await Patient.aggregate([
       { $match: { doctorId: new mongoose.Types.ObjectId(doctorId) } },
