@@ -6813,21 +6813,34 @@ app.get('/doctors/me/patients', authenticateToken, requireUserType(['doctor']), 
       ];
     }
 
-    const options = {
-      page: parseInt(page),
-      limit: parseInt(limit),
-      sort: { [sortBy]: sortOrder === 'desc' ? -1 : 1 }
-    };
+    // حساب التخطي للصفحات
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const sortOptions = { [sortBy]: sortOrder === 'desc' ? -1 : 1 };
 
-    const patients = await Patient.paginate(query, options);
+    // جلب المرضى مع التصفح
+    const patients = await Patient.find(query)
+      .sort(sortOptions)
+      .skip(skip)
+      .limit(parseInt(limit));
+
+    // حساب العدد الإجمالي
+    const total = await Patient.countDocuments(query);
+    const totalPages = Math.ceil(total / parseInt(limit));
 
     res.json({
-      patients: patients.docs,
-      totalPages: patients.totalPages,
-      currentPage: patients.page,
-      totalPatients: patients.totalDocs,
-      hasNextPage: patients.hasNextPage,
-      hasPrevPage: patients.hasPrevPage
+      patients: patients,
+      totalPages: totalPages,
+      currentPage: parseInt(page),
+      totalPatients: total,
+      hasNextPage: skip + patients.length < total,
+      hasPrevPage: parseInt(page) > 1,
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages: totalPages,
+        totalPatients: total,
+        hasNextPage: skip + patients.length < total,
+        hasPrevPage: parseInt(page) > 1
+      }
     });
 
   } catch (error) {
@@ -6887,6 +6900,130 @@ app.post('/doctors/me/patients', authenticateToken, requireUserType(['doctor']),
   } catch (error) {
     console.error('خطأ في إضافة المريض:', error);
     res.status(500).json({ error: 'خطأ في إضافة المريض' });
+  }
+});
+
+// تحديث بيانات المريض
+app.put('/doctors/me/patients/:patientId', authenticateToken, requireUserType(['doctor']), async (req, res) => {
+  try {
+    const doctorId = req.user._id;
+    const { patientId } = req.params;
+    const { name, age, phone, gender, address, emergencyContact, medicalHistory, allergies, medications, notes, status } = req.body;
+
+    // التحقق من صحة معرف المريض
+    if (!mongoose.Types.ObjectId.isValid(patientId)) {
+      return res.status(400).json({ error: 'معرف المريض غير صحيح' });
+    }
+
+    // التحقق من أن المريض ينتمي للطبيب
+    const existingPatient = await Patient.findOne({ _id: patientId, doctorId });
+    if (!existingPatient) {
+      return res.status(404).json({ error: 'المريض غير موجود أو لا ينتمي لهذا الطبيب' });
+    }
+
+    // التحقق من الحقول المطلوبة
+    if (!name || !age || !phone || !gender) {
+      return res.status(400).json({ 
+        error: 'الاسم والعمر ورقم الهاتف والجنس مطلوبة' 
+      });
+    }
+
+    // التحقق من صحة العمر
+    if (age < 1 || age > 120) {
+      return res.status(400).json({ error: 'العمر يجب أن يكون بين 1 و 120' });
+    }
+
+    // التحقق من صحة الجنس
+    if (!['male', 'female'].includes(gender)) {
+      return res.status(400).json({ error: 'الجنس يجب أن يكون ذكر أو أنثى' });
+    }
+
+    // تطبيع رقم الهاتف
+    const normalizedPhone = normalizePhone(phone);
+
+    // تحديث بيانات المريض
+    const updatedPatient = await Patient.findByIdAndUpdate(
+      patientId,
+      {
+        name,
+        age: parseInt(age),
+        phone: normalizedPhone,
+        gender,
+        address,
+        emergencyContact,
+        medicalHistory,
+        allergies,
+        medications,
+        notes,
+        status,
+        updatedAt: new Date()
+      },
+      { new: true }
+    );
+
+    res.json({
+      message: 'تم تحديث بيانات المريض بنجاح',
+      patient: updatedPatient
+    });
+
+  } catch (error) {
+    console.error('خطأ في تحديث المريض:', error);
+    res.status(500).json({ error: 'خطأ في تحديث المريض' });
+  }
+});
+
+// حذف مريض
+app.delete('/doctors/me/patients/:patientId', authenticateToken, requireUserType(['doctor']), async (req, res) => {
+  try {
+    const doctorId = req.user._id;
+    const { patientId } = req.params;
+
+    // التحقق من صحة معرف المريض
+    if (!mongoose.Types.ObjectId.isValid(patientId)) {
+      return res.status(400).json({ error: 'معرف المريض غير صحيح' });
+    }
+
+    // التحقق من أن المريض ينتمي للطبيب
+    const existingPatient = await Patient.findOne({ _id: patientId, doctorId });
+    if (!existingPatient) {
+      return res.status(404).json({ error: 'المريض غير موجود أو لا ينتمي لهذا الطبيب' });
+    }
+
+    // حذف المريض
+    await Patient.findByIdAndDelete(patientId);
+
+    res.json({
+      message: 'تم حذف المريض بنجاح'
+    });
+
+  } catch (error) {
+    console.error('خطأ في حذف المريض:', error);
+    res.status(500).json({ error: 'خطأ في حذف المريض' });
+  }
+});
+
+// جلب تفاصيل مريض واحد
+app.get('/doctors/me/patients/:patientId', authenticateToken, requireUserType(['doctor']), async (req, res) => {
+  try {
+    const doctorId = req.user._id;
+    const { patientId } = req.params;
+
+    // التحقق من صحة معرف المريض
+    if (!mongoose.Types.ObjectId.isValid(patientId)) {
+      return res.status(400).json({ error: 'معرف المريض غير صحيح' });
+    }
+
+    // جلب المريض
+    const patient = await Patient.findOne({ _id: patientId, doctorId });
+    if (!patient) {
+      return res.status(404).json({ error: 'المريض غير موجود أو لا ينتمي لهذا الطبيب' });
+    }
+
+    res.json({ patient });
+
+  } catch (error) {
+    console.error('خطأ في جلب تفاصيل المريض:', error);
+    res.status(500).json({ error: 'خطأ في جلب تفاصيل المريض' });
   }
 });
 
