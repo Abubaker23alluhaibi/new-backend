@@ -314,7 +314,7 @@ const storage = multer.diskStorage({
     // إنشاء اسم ملف آمن وفريد
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
     const ext = path.extname(file.originalname).toLowerCase();
-    const allowedExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
+    const allowedExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.pdf', '.doc', '.docx', '.txt'];
     
     if (!allowedExtensions.includes(ext)) {
       return cb(new Error('نوع الملف غير مسموح به'), null);
@@ -327,12 +327,18 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage: storage,
   limits: {
-    fileSize: 5 * 1024 * 1024, // 5MB
+    fileSize: 10 * 1024 * 1024, // 10MB
     files: 1
   },
   fileFilter: (req, file, cb) => {
     // التحقق من نوع الملف
-    if (file.mimetype.startsWith('image/')) {
+    const allowedMimeTypes = [
+      'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp',
+      'application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'text/plain'
+    ];
+    
+    if (allowedMimeTypes.includes(file.mimetype)) {
       cb(null, true);
     } else {
       cb(new Error('نوع الملف غير مسموح به'), false);
@@ -4359,6 +4365,14 @@ const patientSchema = new mongoose.Schema({
   phone: { type: String, required: true },
   gender: { type: String, enum: ['male', 'female'], required: true },
   address: String,
+  bloodType: { 
+    type: String, 
+    enum: ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-', 'غير محدد'], 
+    default: 'غير محدد' 
+  },
+  chiefComplaint: String, // ما يشكو منه المريض
+  chronicDiseases: String, // الأمراض المزمنة
+  otherConditions: String, // أمراض أخرى
   emergencyContact: {
     name: String,
     phone: String,
@@ -6556,6 +6570,13 @@ app.post('/api/patients/:patientId/medical-reports', authenticateToken, requireU
 
     // رفع الملف إلى Cloudinary
     console.log('🔍 medical-reports upload - uploading to Cloudinary...');
+    console.log('🔍 medical-reports upload - file details:', {
+      originalname: file.originalname,
+      mimetype: file.mimetype,
+      size: file.size,
+      path: file.path
+    });
+    
     const result = await cloudinary.uploader.upload(file.path, {
       folder: 'medical-reports',
       resource_type: 'auto'
@@ -6619,6 +6640,13 @@ app.post('/api/patients/:patientId/examinations', authenticateToken, requireUser
 
     // رفع الملف إلى Cloudinary
     console.log('🔍 examinations upload - uploading to Cloudinary...');
+    console.log('🔍 examinations upload - file details:', {
+      originalname: file.originalname,
+      mimetype: file.mimetype,
+      size: file.size,
+      path: file.path
+    });
+    
     const result = await cloudinary.uploader.upload(file.path, {
       folder: 'examinations',
       resource_type: 'auto'
