@@ -4351,6 +4351,56 @@ const medicineReminderSchema = new mongoose.Schema({
 });
 const MedicineReminder = mongoose.models.MedicineReminder || mongoose.model('MedicineReminder', medicineReminderSchema);
 
+// ===== مخطط إدارة المرضى =====
+const patientSchema = new mongoose.Schema({
+  doctorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Doctor', required: true },
+  name: { type: String, required: true },
+  age: { type: Number, required: true, min: 1, max: 120 },
+  phone: { type: String, required: true },
+  gender: { type: String, enum: ['male', 'female'], required: true },
+  address: String,
+  emergencyContact: {
+    name: String,
+    phone: String,
+    relationship: String
+  },
+  medicalHistory: [{
+    condition: String,
+    diagnosis: String,
+    treatment: String,
+    date: Date
+  }],
+  allergies: [String],
+  medications: [{
+    name: String,
+    dosage: String,
+    frequency: String,
+    startDate: Date,
+    endDate: Date,
+    isActive: { type: Boolean, default: true }
+  }],
+  medicalReports: [{
+    title: String,
+    description: String,
+    fileUrl: String,
+    fileType: String,
+    uploadDate: { type: Date, default: Date.now }
+  }],
+  examinations: [{
+    title: String,
+    description: String,
+    fileUrl: String,
+    fileType: String,
+    uploadDate: { type: Date, default: Date.now }
+  }],
+  notes: String,
+  status: { type: String, enum: ['active', 'inactive'], default: 'active' },
+  createdAt: { type: Date, default: Date.now },
+  updatedAt: { type: Date, default: Date.now }
+});
+
+const Patient = mongoose.models.Patient || mongoose.model('Patient', patientSchema);
+
 // ===== نقاط نهائية إدارة الموظفين =====
 
 // دالة إنشاء رمز دخول عشوائي
@@ -6277,6 +6327,470 @@ app.delete('/api/doctors/:doctorId/bookings-for-others/:personId', async (req, r
 // ===== نهاية API endpoints لإدارة الأشخاص الذين قاموا بحجز مواعيد للآخرين =====
 
 // إضافة موعد خاص (special appointment)
+
+// ===== نقاط النهاية لإدارة المرضى =====
+
+// جلب جميع مرضى الطبيب مع البحث والتصفية
+app.get('/api/doctors/:doctorId/patients', async (req, res) => {
+  try {
+    const { doctorId } = req.params;
+    const { search, status, page = 1, limit = 10 } = req.query;
+
+    // التحقق من صحة معرف الطبيب
+    if (!mongoose.Types.ObjectId.isValid(doctorId)) {
+      return res.status(400).json({ error: 'معرف الطبيب غير صحيح' });
+    }
+
+    // بناء query للبحث
+    let query = { doctorId };
+    
+    if (status) {
+      query.status = status;
+    }
+    
+    if (search) {
+      query.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { phone: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    // حساب التخطي للصفحات
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    // جلب المرضى مع التصفح
+    const patients = await Patient.find(query)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit));
+
+    // حساب العدد الإجمالي
+    const total = await Patient.countDocuments(query);
+
+    res.json({
+      patients,
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages: Math.ceil(total / parseInt(limit)),
+        totalPatients: total,
+        hasNextPage: skip + patients.length < total,
+        hasPrevPage: parseInt(page) > 1
+      }
+    });
+
+  } catch (error) {
+    console.error('خطأ في جلب المرضى:', error);
+    res.status(500).json({ error: 'خطأ في جلب المرضى' });
+  }
+});
+
+// جلب تفاصيل مريض واحد
+app.get('/api/patients/:patientId', async (req, res) => {
+  try {
+    const { patientId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(patientId)) {
+      return res.status(400).json({ error: 'معرف المريض غير صحيح' });
+    }
+
+    const patient = await Patient.findById(patientId);
+    
+    if (!patient) {
+      return res.status(404).json({ error: 'المريض غير موجود' });
+    }
+
+    res.json(patient);
+
+  } catch (error) {
+    console.error('خطأ في جلب تفاصيل المريض:', error);
+    res.status(500).json({ error: 'خطأ في جلب تفاصيل المريض' });
+  }
+});
+
+// إضافة مريض جديد
+app.post('/api/doctors/:doctorId/patients', async (req, res) => {
+  try {
+    const { doctorId } = req.params;
+    const { name, age, phone, gender, address, emergencyContact, medicalHistory, allergies, medications, notes } = req.body;
+
+    // التحقق من صحة معرف الطبيب
+    if (!mongoose.Types.ObjectId.isValid(doctorId)) {
+      return res.status(400).json({ error: 'معرف الطبيب غير صحيح' });
+    }
+
+    // التحقق من الحقول المطلوبة
+    if (!name || !age || !phone || !gender) {
+      return res.status(400).json({ 
+        error: 'الاسم والعمر ورقم الهاتف والجنس مطلوبة' 
+      });
+    }
+
+    // التحقق من صحة العمر
+    if (age < 1 || age > 120) {
+      return res.status(400).json({ error: 'العمر يجب أن يكون بين 1 و 120' });
+    }
+
+    // التحقق من صحة الجنس
+    if (!['male', 'female'].includes(gender)) {
+      return res.status(400).json({ error: 'الجنس يجب أن يكون ذكر أو أنثى' });
+    }
+
+    // تطبيع رقم الهاتف
+    const normalizedPhone = normalizePhone(phone);
+
+    // إنشاء المريض الجديد
+    const patient = new Patient({
+      doctorId,
+      name,
+      age: parseInt(age),
+      phone: normalizedPhone,
+      gender,
+      address,
+      emergencyContact,
+      medicalHistory,
+      allergies,
+      medications,
+      notes
+    });
+
+    await patient.save();
+
+    res.status(201).json({
+      message: 'تم إضافة المريض بنجاح',
+      patient
+    });
+
+  } catch (error) {
+    console.error('خطأ في إضافة المريض:', error);
+    res.status(500).json({ error: 'خطأ في إضافة المريض' });
+  }
+});
+
+// تحديث بيانات المريض
+app.put('/api/patients/:patientId', async (req, res) => {
+  try {
+    const { patientId } = req.params;
+    const updateData = req.body;
+
+    if (!mongoose.Types.ObjectId.isValid(patientId)) {
+      return res.status(400).json({ error: 'معرف المريض غير صحيح' });
+    }
+
+    // التحقق من صحة العمر إذا تم توفيره
+    if (updateData.age && (updateData.age < 1 || updateData.age > 120)) {
+      return res.status(400).json({ error: 'العمر يجب أن يكون بين 1 و 120' });
+    }
+
+    // تطبيع رقم الهاتف إذا تم توفيره
+    if (updateData.phone) {
+      updateData.phone = normalizePhone(updateData.phone);
+    }
+
+    // إضافة تاريخ التحديث
+    updateData.updatedAt = new Date();
+
+    const patient = await Patient.findByIdAndUpdate(
+      patientId,
+      updateData,
+      { new: true, runValidators: true }
+    );
+
+    if (!patient) {
+      return res.status(404).json({ error: 'المريض غير موجود' });
+    }
+
+    res.json({
+      message: 'تم تحديث بيانات المريض بنجاح',
+      patient
+    });
+
+  } catch (error) {
+    console.error('خطأ في تحديث بيانات المريض:', error);
+    res.status(500).json({ error: 'خطأ في تحديث بيانات المريض' });
+  }
+});
+
+// حذف المريض
+app.delete('/api/patients/:patientId', async (req, res) => {
+  try {
+    const { patientId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(patientId)) {
+      return res.status(400).json({ error: 'معرف المريض غير صحيح' });
+    }
+
+    const patient = await Patient.findByIdAndDelete(patientId);
+
+    if (!patient) {
+      return res.status(404).json({ error: 'المريض غير موجود' });
+    }
+
+    res.json({ message: 'تم حذف المريض بنجاح' });
+
+  } catch (error) {
+    console.error('خطأ في حذف المريض:', error);
+    res.status(500).json({ error: 'خطأ في حذف المريض' });
+  }
+});
+
+// إضافة تقرير طبي للمريض
+app.post('/api/patients/:patientId/medical-reports', upload.single('file'), async (req, res) => {
+  try {
+    const { patientId } = req.params;
+    const { title, description } = req.body;
+    const file = req.file;
+
+    if (!mongoose.Types.ObjectId.isValid(patientId)) {
+      return res.status(400).json({ error: 'معرف المريض غير صحيح' });
+    }
+
+    if (!title || !file) {
+      return res.status(400).json({ error: 'العنوان والملف مطلوبان' });
+    }
+
+    // رفع الملف إلى Cloudinary
+    const result = await cloudinary.uploader.upload(file.path, {
+      folder: 'medical-reports',
+      resource_type: 'auto'
+    });
+
+    // حذف الملف المؤقت
+    fs.unlinkSync(file.path);
+
+    const patient = await Patient.findById(patientId);
+    if (!patient) {
+      return res.status(404).json({ error: 'المريض غير موجود' });
+    }
+
+    // إضافة التقرير الطبي
+    patient.medicalReports.push({
+      title,
+      description,
+      fileUrl: result.secure_url,
+      fileType: file.mimetype
+    });
+
+    await patient.save();
+
+    res.status(201).json({
+      message: 'تم إضافة التقرير الطبي بنجاح',
+      report: patient.medicalReports[patient.medicalReports.length - 1]
+    });
+
+  } catch (error) {
+    console.error('خطأ في إضافة التقرير الطبي:', error);
+    res.status(500).json({ error: 'خطأ في إضافة التقرير الطبي' });
+  }
+});
+
+// إضافة فحص طبي للمريض
+app.post('/api/patients/:patientId/examinations', upload.single('file'), async (req, res) => {
+  try {
+    const { patientId } = req.params;
+    const { title, description } = req.body;
+    const file = req.file;
+
+    if (!mongoose.Types.ObjectId.isValid(patientId)) {
+      return res.status(400).json({ error: 'معرف المريض غير صحيح' });
+    }
+
+    if (!title || !file) {
+      return res.status(400).json({ error: 'العنوان والملف مطلوبان' });
+    }
+
+    // رفع الملف إلى Cloudinary
+    const result = await cloudinary.uploader.upload(file.path, {
+      folder: 'examinations',
+      resource_type: 'auto'
+    });
+
+    // حذف الملف المؤقت
+    fs.unlinkSync(file.path);
+
+    const patient = await Patient.findById(patientId);
+    if (!patient) {
+      return res.status(404).json({ error: 'المريض غير موجود' });
+    }
+
+    // إضافة الفحص الطبي
+    patient.examinations.push({
+      title,
+      description,
+      fileUrl: result.secure_url,
+      fileType: file.mimetype
+    });
+
+    await patient.save();
+
+    res.status(201).json({
+      message: 'تم إضافة الفحص الطبي بنجاح',
+      examination: patient.examinations[patient.examinations.length - 1]
+    });
+
+  } catch (error) {
+    console.error('خطأ في إضافة الفحص الطبي:', error);
+    res.status(500).json({ error: 'خطأ في إضافة الفحص الطبي' });
+  }
+});
+
+// حذف تقرير طبي
+app.delete('/api/patients/:patientId/medical-reports/:reportId', async (req, res) => {
+  try {
+    const { patientId, reportId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(patientId)) {
+      return res.status(400).json({ error: 'معرف المريض غير صحيح' });
+    }
+
+    const patient = await Patient.findById(patientId);
+    if (!patient) {
+      return res.status(404).json({ error: 'المريض غير موجود' });
+    }
+
+    const reportIndex = patient.medicalReports.findIndex(
+      report => report._id.toString() === reportId
+    );
+
+    if (reportIndex === -1) {
+      return res.status(404).json({ error: 'التقرير الطبي غير موجود' });
+    }
+
+    // حذف الملف من Cloudinary إذا كان موجوداً
+    const report = patient.medicalReports[reportIndex];
+    if (report.fileUrl) {
+      try {
+        const publicId = report.fileUrl.split('/').pop().split('.')[0];
+        await cloudinary.uploader.destroy(publicId);
+      } catch (cloudinaryError) {
+        console.error('خطأ في حذف الملف من Cloudinary:', cloudinaryError);
+      }
+    }
+
+    // حذف التقرير من المصفوفة
+    patient.medicalReports.splice(reportIndex, 1);
+    await patient.save();
+
+    res.json({ message: 'تم حذف التقرير الطبي بنجاح' });
+
+  } catch (error) {
+    console.error('خطأ في حذف التقرير الطبي:', error);
+    res.status(500).json({ error: 'خطأ في حذف التقرير الطبي' });
+  }
+});
+
+// حذف فحص طبي
+app.delete('/api/patients/:patientId/examinations/:examinationId', async (req, res) => {
+  try {
+    const { patientId, examinationId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(patientId)) {
+      return res.status(400).json({ error: 'معرف المريض غير صحيح' });
+    }
+
+    const patient = await Patient.findById(patientId);
+    if (!patient) {
+      return res.status(404).json({ error: 'المريض غير موجود' });
+    }
+
+    const examinationIndex = patient.examinations.findIndex(
+      examination => examination._id.toString() === examinationId
+    );
+
+    if (examinationIndex === -1) {
+      return res.status(404).json({ error: 'الفحص الطبي غير موجود' });
+    }
+
+    // حذف الملف من Cloudinary إذا كان موجوداً
+    const examination = patient.examinations[examinationIndex];
+    if (examination.fileUrl) {
+      try {
+        const publicId = examination.fileUrl.split('/').pop().split('.')[0];
+        await cloudinary.uploader.destroy(publicId);
+      } catch (cloudinaryError) {
+        console.error('خطأ في حذف الملف من Cloudinary:', cloudinaryError);
+      }
+    }
+
+    // حذف الفحص من المصفوفة
+    patient.examinations.splice(examinationIndex, 1);
+    await patient.save();
+
+    res.json({ message: 'تم حذف الفحص الطبي بنجاح' });
+
+  } catch (error) {
+    console.error('خطأ في حذف الفحص الطبي:', error);
+    res.status(500).json({ error: 'خطأ في حذف الفحص الطبي' });
+  }
+});
+
+// إحصائيات المرضى للطبيب
+app.get('/api/doctors/:doctorId/patients/stats', async (req, res) => {
+  try {
+    const { doctorId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(doctorId)) {
+      return res.status(400).json({ error: 'معرف الطبيب غير صحيح' });
+    }
+
+    const stats = await Patient.aggregate([
+      { $match: { doctorId: new mongoose.Types.ObjectId(doctorId) } },
+      {
+        $group: {
+          _id: null,
+          totalPatients: { $sum: 1 },
+          activePatients: { $sum: { $cond: [{ $eq: ['$status', 'active'] }, 1, 0] } },
+          inactivePatients: { $sum: { $cond: [{ $eq: ['$status', 'inactive'] }, 1, 0] } },
+          malePatients: { $sum: { $cond: [{ $eq: ['$gender', 'male'] }, 1, 0] } },
+          femalePatients: { $sum: { $cond: [{ $eq: ['$gender', 'female'] }, 1, 0] } },
+          avgAge: { $avg: '$age' }
+        }
+      }
+    ]);
+
+    // إحصائيات الفئات العمرية
+    const ageGroups = await Patient.aggregate([
+      { $match: { doctorId: new mongoose.Types.ObjectId(doctorId) } },
+      {
+        $group: {
+          _id: {
+            $switch: {
+              branches: [
+                { case: { $lt: ['$age', 18] }, then: '0-17' },
+                { case: { $lt: ['$age', 30] }, then: '18-29' },
+                { case: { $lt: ['$age', 50] }, then: '30-49' },
+                { case: { $lt: ['$age', 65] }, then: '50-64' }
+              ],
+              default: '65+'
+            }
+          },
+          count: { $sum: 1 }
+        }
+      },
+      { $sort: { '_id': 1 } }
+    ]);
+
+    const result = stats[0] || {
+      totalPatients: 0,
+      activePatients: 0,
+      inactivePatients: 0,
+      malePatients: 0,
+      femalePatients: 0,
+      avgAge: 0
+    };
+
+    res.json({
+      ...result,
+      avgAge: Math.round(result.avgAge || 0),
+      ageGroups
+    });
+
+  } catch (error) {
+    console.error('خطأ في جلب إحصائيات المرضى:', error);
+    res.status(500).json({ error: 'خطأ في جلب إحصائيات المرضى' });
+  }
+});
+
+// ===== نهاية نقاط النهاية لإدارة المرضى =====
 
 // ===== 404 Handler - يجب أن يكون في النهاية =====
 app.use('*', (req, res) => {
