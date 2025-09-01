@@ -6779,9 +6779,153 @@ app.get('/api/doctors/:doctorId/patients/stats', async (req, res) => {
     };
 
     res.json({
-      ...result,
+      total: result.totalPatients,
+      active: result.activePatients,
+      inactive: result.inactivePatients,
+      male: result.malePatients,
+      female: result.femalePatients,
       avgAge: Math.round(result.avgAge || 0),
       ageGroups
+    });
+
+  } catch (error) {
+    console.error('خطأ في جلب إحصائيات المرضى:', error);
+    res.status(500).json({ error: 'خطأ في جلب إحصائيات المرضى' });
+  }
+});
+
+// ===== نقاط النهاية للمريض الحالي (/me) =====
+
+// جلب مرضى الطبيب الحالي
+app.get('/doctors/me/patients', authenticateToken, requireUserType(['doctor']), async (req, res) => {
+  try {
+    const doctorId = req.user._id;
+    const { page = 1, limit = 10, search = '', sortBy = 'createdAt', sortOrder = 'desc' } = req.query;
+
+    const query = { doctorId };
+    
+    // إضافة البحث إذا تم توفيره
+    if (search) {
+      query.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { phone: { $regex: search, $options: 'i' } },
+        { address: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    const options = {
+      page: parseInt(page),
+      limit: parseInt(limit),
+      sort: { [sortBy]: sortOrder === 'desc' ? -1 : 1 }
+    };
+
+    const patients = await Patient.paginate(query, options);
+
+    res.json({
+      patients: patients.docs,
+      totalPages: patients.totalPages,
+      currentPage: patients.page,
+      totalPatients: patients.totalDocs,
+      hasNextPage: patients.hasNextPage,
+      hasPrevPage: patients.hasPrevPage
+    });
+
+  } catch (error) {
+    console.error('خطأ في جلب مرضى الطبيب:', error);
+    res.status(500).json({ error: 'خطأ في جلب مرضى الطبيب' });
+  }
+});
+
+// إضافة مريض جديد للطبيب الحالي
+app.post('/doctors/me/patients', authenticateToken, requireUserType(['doctor']), async (req, res) => {
+  try {
+    const doctorId = req.user._id;
+    const { name, age, phone, gender, address, emergencyContact, medicalHistory, allergies, medications, notes } = req.body;
+
+    // التحقق من الحقول المطلوبة
+    if (!name || !age || !phone || !gender) {
+      return res.status(400).json({ 
+        error: 'الاسم والعمر ورقم الهاتف والجنس مطلوبة' 
+      });
+    }
+
+    // التحقق من صحة العمر
+    if (age < 1 || age > 120) {
+      return res.status(400).json({ error: 'العمر يجب أن يكون بين 1 و 120' });
+    }
+
+    // التحقق من صحة الجنس
+    if (!['male', 'female'].includes(gender)) {
+      return res.status(400).json({ error: 'الجنس يجب أن يكون ذكر أو أنثى' });
+    }
+
+    // تطبيع رقم الهاتف
+    const normalizedPhone = normalizePhone(phone);
+
+    // إنشاء المريض الجديد
+    const patient = new Patient({
+      doctorId,
+      name,
+      age: parseInt(age),
+      phone: normalizedPhone,
+      gender,
+      address,
+      emergencyContact,
+      medicalHistory,
+      allergies,
+      medications,
+      notes
+    });
+
+    await patient.save();
+
+    res.status(201).json({
+      message: 'تم إضافة المريض بنجاح',
+      patient
+    });
+
+  } catch (error) {
+    console.error('خطأ في إضافة المريض:', error);
+    res.status(500).json({ error: 'خطأ في إضافة المريض' });
+  }
+});
+
+// إحصائيات مرضى الطبيب الحالي
+app.get('/doctors/me/patients/stats', authenticateToken, requireUserType(['doctor']), async (req, res) => {
+  try {
+    const doctorId = req.user._id;
+
+    const stats = await Patient.aggregate([
+      { $match: { doctorId: new mongoose.Types.ObjectId(doctorId) } },
+      {
+        $group: {
+          _id: null,
+          totalPatients: { $sum: 1 },
+          activePatients: { $sum: { $cond: [{ $eq: ['$status', 'active'] }, 1, 0] } },
+          inactivePatients: { $sum: { $cond: [{ $eq: ['$status', 'inactive'] }, 1, 0] } },
+          malePatients: { $sum: { $cond: [{ $eq: ['$gender', 'male'] }, 1, 0] } },
+          femalePatients: { $sum: { $cond: [{ $eq: ['$gender', 'female'] }, 1, 0] } },
+          avgAge: { $avg: '$age' }
+        }
+      }
+    ]);
+
+    const result = stats[0] || {
+      totalPatients: 0,
+      activePatients: 0,
+      inactivePatients: 0,
+      malePatients: 0,
+      femalePatients: 0,
+      avgAge: 0
+    };
+
+    res.json({
+      total: result.totalPatients,
+      active: result.activePatients,
+      inactive: result.inactivePatients,
+      male: result.malePatients,
+      female: result.femalePatients,
+      avgAge: Math.round(result.avgAge || 0)
     });
 
   } catch (error) {
