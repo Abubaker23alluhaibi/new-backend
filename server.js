@@ -6579,7 +6579,10 @@ app.post('/api/patients/:patientId/medical-reports', authenticateToken, requireU
     
     const result = await cloudinary.uploader.upload(file.path, {
       folder: 'medical-reports',
-      resource_type: 'auto'
+      resource_type: 'auto',
+      use_filename: true,
+      unique_filename: false,
+      overwrite: false
     });
     console.log('🔍 medical-reports upload - Cloudinary result:', result);
 
@@ -6649,7 +6652,10 @@ app.post('/api/patients/:patientId/examinations', authenticateToken, requireUser
     
     const result = await cloudinary.uploader.upload(file.path, {
       folder: 'examinations',
-      resource_type: 'auto'
+      resource_type: 'auto',
+      use_filename: true,
+      unique_filename: false,
+      overwrite: false
     });
     console.log('🔍 examinations upload - Cloudinary result:', result);
 
