@@ -6534,35 +6534,47 @@ app.delete('/api/patients/:patientId', async (req, res) => {
 });
 
 // إضافة تقرير طبي للمريض
-app.post('/api/patients/:patientId/medical-reports', upload.single('file'), async (req, res) => {
+app.post('/api/patients/:patientId/medical-reports', authenticateToken, requireUserType(['doctor']), upload.single('file'), async (req, res) => {
   try {
+    console.log('🔍 medical-reports upload - req.params:', req.params);
+    console.log('🔍 medical-reports upload - req.body:', req.body);
+    console.log('🔍 medical-reports upload - req.file:', req.file);
+    
     const { patientId } = req.params;
     const { title, description } = req.body;
     const file = req.file;
 
     if (!mongoose.Types.ObjectId.isValid(patientId)) {
+      console.log('❌ medical-reports upload - invalid patientId:', patientId);
       return res.status(400).json({ error: 'معرف المريض غير صحيح' });
     }
 
     if (!title || !file) {
+      console.log('❌ medical-reports upload - missing title or file:', { title, file: !!file });
       return res.status(400).json({ error: 'العنوان والملف مطلوبان' });
     }
 
     // رفع الملف إلى Cloudinary
+    console.log('🔍 medical-reports upload - uploading to Cloudinary...');
     const result = await cloudinary.uploader.upload(file.path, {
       folder: 'medical-reports',
       resource_type: 'auto'
     });
+    console.log('🔍 medical-reports upload - Cloudinary result:', result);
 
     // حذف الملف المؤقت
     fs.unlinkSync(file.path);
 
-    const patient = await Patient.findById(patientId);
+    console.log('🔍 medical-reports upload - finding patient:', patientId);
+    const doctorId = req.user._id;
+    const patient = await Patient.findOne({ _id: patientId, doctorId });
     if (!patient) {
-      return res.status(404).json({ error: 'المريض غير موجود' });
+      console.log('❌ medical-reports upload - patient not found or not owned by doctor:', { patientId, doctorId });
+      return res.status(404).json({ error: 'المريض غير موجود أو لا ينتمي لهذا الطبيب' });
     }
 
     // إضافة التقرير الطبي
+    console.log('🔍 medical-reports upload - adding report to patient...');
     patient.medicalReports.push({
       title,
       description,
@@ -6571,6 +6583,7 @@ app.post('/api/patients/:patientId/medical-reports', upload.single('file'), asyn
     });
 
     await patient.save();
+    console.log('🔍 medical-reports upload - patient saved successfully');
 
     res.status(201).json({
       message: 'تم إضافة التقرير الطبي بنجاح',
@@ -6578,41 +6591,53 @@ app.post('/api/patients/:patientId/medical-reports', upload.single('file'), asyn
     });
 
   } catch (error) {
-    console.error('خطأ في إضافة التقرير الطبي:', error);
+    console.error('❌ خطأ في إضافة التقرير الطبي:', error);
     res.status(500).json({ error: 'خطأ في إضافة التقرير الطبي' });
   }
 });
 
 // إضافة فحص طبي للمريض
-app.post('/api/patients/:patientId/examinations', upload.single('file'), async (req, res) => {
+app.post('/api/patients/:patientId/examinations', authenticateToken, requireUserType(['doctor']), upload.single('file'), async (req, res) => {
   try {
+    console.log('🔍 examinations upload - req.params:', req.params);
+    console.log('🔍 examinations upload - req.body:', req.body);
+    console.log('🔍 examinations upload - req.file:', req.file);
+    
     const { patientId } = req.params;
     const { title, description } = req.body;
     const file = req.file;
 
     if (!mongoose.Types.ObjectId.isValid(patientId)) {
+      console.log('❌ examinations upload - invalid patientId:', patientId);
       return res.status(400).json({ error: 'معرف المريض غير صحيح' });
     }
 
     if (!title || !file) {
+      console.log('❌ examinations upload - missing title or file:', { title, file: !!file });
       return res.status(400).json({ error: 'العنوان والملف مطلوبان' });
     }
 
     // رفع الملف إلى Cloudinary
+    console.log('🔍 examinations upload - uploading to Cloudinary...');
     const result = await cloudinary.uploader.upload(file.path, {
       folder: 'examinations',
       resource_type: 'auto'
     });
+    console.log('🔍 examinations upload - Cloudinary result:', result);
 
     // حذف الملف المؤقت
     fs.unlinkSync(file.path);
 
-    const patient = await Patient.findById(patientId);
+    console.log('🔍 examinations upload - finding patient:', patientId);
+    const doctorId = req.user._id;
+    const patient = await Patient.findOne({ _id: patientId, doctorId });
     if (!patient) {
-      return res.status(404).json({ error: 'المريض غير موجود' });
+      console.log('❌ examinations upload - patient not found or not owned by doctor:', { patientId, doctorId });
+      return res.status(404).json({ error: 'المريض غير موجود أو لا ينتمي لهذا الطبيب' });
     }
 
     // إضافة الفحص الطبي
+    console.log('🔍 examinations upload - adding examination to patient...');
     patient.examinations.push({
       title,
       description,
@@ -6621,6 +6646,7 @@ app.post('/api/patients/:patientId/examinations', upload.single('file'), async (
     });
 
     await patient.save();
+    console.log('🔍 examinations upload - patient saved successfully');
 
     res.status(201).json({
       message: 'تم إضافة الفحص الطبي بنجاح',
@@ -6628,7 +6654,7 @@ app.post('/api/patients/:patientId/examinations', upload.single('file'), async (
     });
 
   } catch (error) {
-    console.error('خطأ في إضافة الفحص الطبي:', error);
+    console.error('❌ خطأ في إضافة الفحص الطبي:', error);
     res.status(500).json({ error: 'خطأ في إضافة الفحص الطبي' });
   }
 });
