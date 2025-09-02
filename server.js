@@ -7147,13 +7147,21 @@ app.get('/doctors/me/patients/stats', authenticateToken, requireUserType(['docto
 // ===== نهاية نقاط النهاية لإدارة المرضى =====
 
 // ===== تحميل ملفات PDF مع التوكن =====
-app.get('/api/secure-files/*', async (req, res) => {
+app.get('/api/secure-files/*', (req, res, next) => {
+  // إضافة CORS headers
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  next();
+}, async (req, res) => {
   try {
     const fileUrl = req.params[0]; // الحصول على باقي المسار
     const token = req.query.token || req.headers.authorization?.replace('Bearer ', '');
     
     console.log('🔍 secure-files - fileUrl:', fileUrl);
     console.log('🔍 secure-files - token:', token ? 'present' : 'missing');
+    console.log('🔍 secure-files - query token:', req.query.token ? 'present' : 'missing');
+    console.log('🔍 secure-files - header token:', req.headers.authorization ? 'present' : 'missing');
 
     if (!token) {
       console.log('❌ secure-files - no token provided');
@@ -7200,7 +7208,9 @@ app.get('/api/secure-files/*', async (req, res) => {
       res.set({
         'Content-Type': response.headers['content-type'] || 'application/octet-stream',
         'Content-Length': response.headers['content-length'],
-        'Cache-Control': 'private, max-age=3600'
+        'Cache-Control': 'private, max-age=3600',
+        'Content-Security-Policy': "frame-ancestors 'self' *",
+        'X-Frame-Options': 'ALLOWALL'
       });
       
       response.data.pipe(res);
