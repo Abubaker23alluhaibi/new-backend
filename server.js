@@ -25,7 +25,7 @@ const mongoSanitize = require('express-mongo-sanitize');
 const rateLimit = require('express-rate-limit');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
-const fetch = require('node-fetch');
+const axios = require('axios');
 
 const app = express();
 
@@ -7192,21 +7192,18 @@ app.get('/api/secure-files/*', async (req, res) => {
 
     // تحميل الملف من Cloudinary وإرساله مباشرة
     try {
-      const response = await fetch(fileUrl);
-      if (!response.ok) {
-        throw new Error(`Failed to fetch file: ${response.status}`);
-      }
-      
-      const buffer = await response.buffer();
-      const contentType = response.headers.get('content-type') || 'application/octet-stream';
+      const response = await axios.get(fileUrl, {
+        responseType: 'stream',
+        timeout: 30000
+      });
       
       res.set({
-        'Content-Type': contentType,
-        'Content-Length': buffer.length,
+        'Content-Type': response.headers['content-type'] || 'application/octet-stream',
+        'Content-Length': response.headers['content-length'],
         'Cache-Control': 'private, max-age=3600'
       });
       
-      res.send(buffer);
+      response.data.pipe(res);
     } catch (fetchError) {
       console.error('Error fetching file from Cloudinary:', fetchError);
       // في حالة فشل التحميل، إعادة توجيه للملف الأصلي
