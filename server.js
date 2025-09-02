@@ -1538,7 +1538,15 @@ app.get('/ratings/doctor/:doctorId/private', authenticateToken, async (req, res)
     const { doctorId } = req.params;
     const { page = 1, limit = 10 } = req.query;
     
-    // Debug logs removed after fixing the issue
+    console.log('🔍 Debug - req.user:', JSON.stringify(req.user, null, 2));
+    console.log('🔍 Debug - doctorId:', doctorId);
+    console.log('🔍 Debug - req.user._id:', req.user._id);
+    console.log('🔍 Debug - req.user.userId:', req.user.userId);
+    console.log('🔍 Debug - req.user.id:', req.user.id);
+    console.log('🔍 Debug - Comparison results:');
+    console.log('  - req.user._id === doctorId:', req.user._id === doctorId);
+    console.log('  - req.user.userId === doctorId:', req.user.userId === doctorId);
+    console.log('  - req.user.id === doctorId:', req.user.id === doctorId);
     
     // التحقق من أن المستخدم هو الطبيب نفسه
     const doctor = await Doctor.findById(doctorId);
@@ -1639,7 +1647,15 @@ app.get('/notifications/doctor/:doctorId', authenticateToken, async (req, res) =
     const { doctorId } = req.params;
     const { page = 1, limit = 20 } = req.query;
     
-    // Debug logs removed after fixing the issue
+    console.log('🔍 Debug Notifications - req.user:', JSON.stringify(req.user, null, 2));
+    console.log('🔍 Debug Notifications - doctorId:', doctorId);
+    console.log('🔍 Debug Notifications - req.user._id:', req.user._id);
+    console.log('🔍 Debug Notifications - req.user.userId:', req.user.userId);
+    console.log('🔍 Debug Notifications - req.user.id:', req.user.id);
+    console.log('🔍 Debug Notifications - Comparison results:');
+    console.log('  - req.user._id === doctorId:', req.user._id === doctorId);
+    console.log('  - req.user.userId === doctorId:', req.user.userId === doctorId);
+    console.log('  - req.user.id === doctorId:', req.user.id === doctorId);
     
     // التحقق من أن المستخدم هو الطبيب نفسه
     if (req.user._id !== doctorId && req.user.userId !== doctorId && req.user.id !== doctorId) {
