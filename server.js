@@ -4327,7 +4327,8 @@ const employeeSchema = new mongoose.Schema({
           MANAGE_EMPLOYEES: { type: Boolean, default: false },
           MANAGE_SPECIAL_APPOINTMENTS: { type: Boolean, default: false },
           MANAGE_APPOINTMENT_DURATION: { type: Boolean, default: false },
-          VIEW_BOOKINGS_STATS: { type: Boolean, default: false }
+          VIEW_BOOKINGS_STATS: { type: Boolean, default: false },
+          MANAGE_PATIENTS: { type: Boolean, default: false }
         },
   isActive: { type: Boolean, default: true },
   createdAt: { type: Date, default: Date.now },
@@ -4598,7 +4599,8 @@ app.post('/verify-doctor-code', async (req, res) => {
           MANAGE_EMPLOYEES: true,
           MANAGE_SPECIAL_APPOINTMENTS: true,
           MANAGE_APPOINTMENT_DURATION: true,
-          VIEW_BOOKINGS_STATS: true
+          VIEW_BOOKINGS_STATS: true,
+          MANAGE_PATIENTS: true
         };
     
     res.json({ 
@@ -6913,7 +6915,7 @@ app.get('/doctors/me/patients', authenticateToken, requireUserType(['doctor']), 
 app.post('/doctors/me/patients', authenticateToken, requireUserType(['doctor']), async (req, res) => {
   try {
     const doctorId = req.user._id;
-    const { name, age, phone, gender, address, emergencyContact, medicalHistory, allergies, medications, notes } = req.body;
+    const { name, age, phone, gender, address, bloodType, chiefComplaint, chronicDiseases, otherConditions, emergencyContact, medicalHistory, allergies, medications, notes } = req.body;
 
     // التحقق من الحقول المطلوبة
     if (!name || !age || !phone || !gender) {
@@ -6943,6 +6945,10 @@ app.post('/doctors/me/patients', authenticateToken, requireUserType(['doctor']),
       phone: normalizedPhone,
       gender,
       address,
+      bloodType: bloodType || 'غير محدد',
+      chiefComplaint,
+      chronicDiseases,
+      otherConditions,
       emergencyContact,
       medicalHistory,
       allergies,
@@ -6968,7 +6974,7 @@ app.put('/doctors/me/patients/:patientId', authenticateToken, requireUserType(['
   try {
     const doctorId = req.user._id;
     const { patientId } = req.params;
-    const { name, age, phone, gender, address, emergencyContact, medicalHistory, allergies, medications, notes, status } = req.body;
+    const { name, age, phone, gender, address, bloodType, chiefComplaint, chronicDiseases, otherConditions, emergencyContact, medicalHistory, allergies, medications, notes, status } = req.body;
 
     // التحقق من صحة معرف المريض
     if (!mongoose.Types.ObjectId.isValid(patientId)) {
@@ -7010,6 +7016,10 @@ app.put('/doctors/me/patients/:patientId', authenticateToken, requireUserType(['
         phone: normalizedPhone,
         gender,
         address,
+        bloodType: bloodType || 'غير محدد',
+        chiefComplaint,
+        chronicDiseases,
+        otherConditions,
         emergencyContact,
         medicalHistory,
         allergies,
