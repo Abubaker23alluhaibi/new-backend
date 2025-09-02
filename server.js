@@ -599,6 +599,9 @@ const doctorSchema = new mongoose.Schema({
   created_at: { type: Date, default: Date.now },
   createdAt: { type: Date, default: Date.now },
   appointmentDuration: { type: Number, default: 30 }, // مدة الموعد الافتراضية بالدقائق
+  // حقول التقييم
+  averageRating: { type: Number, default: 0, min: 0, max: 5 }, // متوسط التقييم
+  totalRatings: { type: Number, default: 0 }, // إجمالي عدد التقييمات
 });
 const Doctor = mongoose.model('Doctor', doctorSchema);
 
@@ -630,6 +633,22 @@ const appointmentSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 const Appointment = mongoose.model('Appointment', appointmentSchema);
+
+// مخطط التقييمات
+const ratingSchema = new mongoose.Schema({
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true }, // المستخدم الذي قام بالتقييم
+  doctorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Doctor', required: true }, // الطبيب المقيم
+  rating: { type: Number, required: true, min: 1, max: 5 }, // التقييم من 1 إلى 5
+  comment: { type: String, maxlength: 500 }, // تعليق اختياري
+  appointmentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Appointment' }, // ربط بالموعد إذا كان موجود
+  createdAt: { type: Date, default: Date.now },
+  updatedAt: { type: Date, default: Date.now }
+});
+
+// فهرس فريد لمنع التقييم المتكرر من نفس المستخدم لنفس الطبيب
+ratingSchema.index({ userId: 1, doctorId: 1 }, { unique: true });
+
+const Rating = mongoose.model('Rating', ratingSchema);
 
 // مخطط الرسائل
 const messageSchema = new mongoose.Schema({
@@ -1369,7 +1388,7 @@ app.get('/doctors', async (req, res) => {
   try {
     // جلب الأطباء المميزين أولاً
     const featuredDoctors = await FeaturedDoctor.find({})
-      .populate('doctorId', 'name specialty province area image profileImage about workTimes experienceYears phone clinicLocation mapLocation status active createdAt disabled')
+      .populate('doctorId', 'name specialty province area image profileImage about workTimes experienceYears phone clinicLocation mapLocation status active createdAt disabled averageRating totalRatings')
       .sort({ priority: -1, createdAt: -1 });
     
     // جلب باقي الأطباء الموافق عليهم
@@ -1401,6 +1420,161 @@ app.get('/doctors', async (req, res) => {
     res.status(500).json({ error: 'حدث خطأ أثناء جلب قائمة الأطباء' });
   }
 });
+
+// ===== API endpoints للتقييمات =====
+
+// إضافة تقييم جديد
+app.post('/ratings', async (req, res) => {
+  try {
+    const { userId, doctorId, rating, comment, appointmentId } = req.body;
+    
+    // التحقق من البيانات المطلوبة
+    if (!userId || !doctorId || !rating) {
+      return res.status(400).json({ error: 'البيانات ناقصة - userId, doctorId, rating مطلوبة' });
+    }
+    
+    // التحقق من صحة التقييم
+    if (rating < 1 || rating > 5) {
+      return res.status(400).json({ error: 'التقييم يجب أن يكون بين 1 و 5' });
+    }
+    
+    // التحقق من وجود الطبيب
+    const doctor = await Doctor.findById(doctorId);
+    if (!doctor) {
+      return res.status(404).json({ error: 'الطبيب غير موجود' });
+    }
+    
+    // التحقق من وجود المستخدم
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ error: 'المستخدم غير موجود' });
+    }
+    
+    // البحث عن تقييم موجود
+    const existingRating = await Rating.findOne({ userId, doctorId });
+    
+    let savedRating;
+    if (existingRating) {
+      // تحديث التقييم الموجود
+      existingRating.rating = rating;
+      existingRating.comment = comment || existingRating.comment;
+      existingRating.updatedAt = new Date();
+      savedRating = await existingRating.save();
+    } else {
+      // إنشاء تقييم جديد
+      const newRating = new Rating({
+        userId,
+        doctorId,
+        rating,
+        comment,
+        appointmentId
+      });
+      savedRating = await newRating.save();
+    }
+    
+    // تحديث متوسط التقييم وعدد التقييمات للطبيب
+    await updateDoctorRatingStats(doctorId);
+    
+    res.json({ 
+      message: existingRating ? 'تم تحديث التقييم بنجاح' : 'تم إضافة التقييم بنجاح',
+      rating: savedRating 
+    });
+    
+  } catch (err) {
+    console.error('❌ Rating error:', err);
+    if (err.code === 11000) {
+      return res.status(400).json({ error: 'لقد قمت بتقييم هذا الطبيب مسبقاً' });
+    }
+    res.status(500).json({ error: 'حدث خطأ أثناء إضافة التقييم' });
+  }
+});
+
+// جلب تقييمات طبيب معين
+app.get('/ratings/doctor/:doctorId', async (req, res) => {
+  try {
+    const { doctorId } = req.params;
+    const { page = 1, limit = 10 } = req.query;
+    
+    const ratings = await Rating.find({ doctorId })
+      .populate('userId', 'first_name email')
+      .sort({ createdAt: -1 })
+      .limit(limit * 1)
+      .skip((page - 1) * limit);
+    
+    const totalRatings = await Rating.countDocuments({ doctorId });
+    
+    res.json({
+      ratings,
+      totalRatings,
+      totalPages: Math.ceil(totalRatings / limit),
+      currentPage: page
+    });
+    
+  } catch (err) {
+    console.error('❌ Get ratings error:', err);
+    res.status(500).json({ error: 'حدث خطأ أثناء جلب التقييمات' });
+  }
+});
+
+// جلب أعلى 20 طبيب تقييماً
+app.get('/doctors/top-rated', async (req, res) => {
+  try {
+    const topRatedDoctors = await Doctor.find({ 
+      status: 'approved',
+      totalRatings: { $gt: 0 } // فقط الأطباء الذين لديهم تقييمات
+    })
+    .select('name specialty province area image profileImage about workTimes experienceYears phone clinicLocation mapLocation averageRating totalRatings')
+    .sort({ averageRating: -1, totalRatings: -1 })
+    .limit(20);
+    
+    // تنسيق الأسماء وإضافة URLs للصور
+    const formattedDoctors = topRatedDoctors.map(doctor => {
+      const doctorObj = doctor.toObject();
+      doctorObj.name = formatDoctorName(doctorObj.name);
+      
+      // إضافة URL كامل للصورة
+      if (doctorObj.image) {
+        const baseUrl = req.protocol + '://' + req.get('host');
+        doctorObj.imageUrl = `${baseUrl}${doctorObj.image}`;
+      }
+      
+      return doctorObj;
+    });
+    
+    res.json(formattedDoctors);
+    
+  } catch (err) {
+    console.error('❌ Get top rated doctors error:', err);
+    res.status(500).json({ error: 'حدث خطأ أثناء جلب الأطباء الأعلى تقييماً' });
+  }
+});
+
+// دالة مساعدة لتحديث إحصائيات التقييم للطبيب
+async function updateDoctorRatingStats(doctorId) {
+  try {
+    const ratings = await Rating.find({ doctorId });
+    
+    if (ratings.length === 0) {
+      await Doctor.findByIdAndUpdate(doctorId, {
+        averageRating: 0,
+        totalRatings: 0
+      });
+      return;
+    }
+    
+    const totalRatings = ratings.length;
+    const sumRatings = ratings.reduce((sum, rating) => sum + rating.rating, 0);
+    const averageRating = Math.round((sumRatings / totalRatings) * 10) / 10; // تقريب لرقم عشري واحد
+    
+    await Doctor.findByIdAndUpdate(doctorId, {
+      averageRating,
+      totalRatings
+    });
+    
+  } catch (err) {
+    console.error('❌ Update doctor rating stats error:', err);
+  }
+}
 
 // جلب جميع الأطباء (للإدارة - يشمل المعلقين مع جميع البيانات) - محمي بـ JWT
 app.get('/admin/doctors', authenticateToken, requireUserType(['admin']), async (req, res) => {
