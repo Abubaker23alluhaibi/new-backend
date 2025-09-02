@@ -1538,6 +1538,8 @@ app.get('/ratings/doctor/:doctorId/private', authenticateToken, async (req, res)
     const { doctorId } = req.params;
     const { page = 1, limit = 10 } = req.query;
     
+    // Debug logs removed after fixing the issue
+    
     // التحقق من أن المستخدم هو الطبيب نفسه
     const doctor = await Doctor.findById(doctorId);
     if (!doctor) {
@@ -1545,7 +1547,8 @@ app.get('/ratings/doctor/:doctorId/private', authenticateToken, async (req, res)
     }
     
     // التحقق من أن المستخدم الحالي هو الطبيب نفسه
-    if (req.user.userId !== doctorId) {
+    if (req.user._id !== doctorId && req.user.userId !== doctorId && req.user.id !== doctorId) {
+      // Access denied - userId mismatch
       return res.status(403).json({ error: 'غير مصرح لك بالوصول لهذه البيانات' });
     }
     
@@ -1636,8 +1639,11 @@ app.get('/notifications/doctor/:doctorId', authenticateToken, async (req, res) =
     const { doctorId } = req.params;
     const { page = 1, limit = 20 } = req.query;
     
+    // Debug logs removed after fixing the issue
+    
     // التحقق من أن المستخدم هو الطبيب نفسه
-    if (req.user.userId !== doctorId) {
+    if (req.user._id !== doctorId && req.user.userId !== doctorId && req.user.id !== doctorId) {
+      // Access denied for notifications - userId mismatch
       return res.status(403).json({ error: 'غير مصرح لك بالوصول لهذه البيانات' });
     }
     
