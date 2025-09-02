@@ -25,6 +25,7 @@ const mongoSanitize = require('express-mongo-sanitize');
 const rateLimit = require('express-rate-limit');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
+const fetch = require('node-fetch');
 
 const app = express();
 
@@ -7146,14 +7147,34 @@ app.get('/doctors/me/patients/stats', authenticateToken, requireUserType(['docto
 // ===== نهاية نقاط النهاية لإدارة المرضى =====
 
 // ===== تحميل ملفات PDF مع التوكن =====
-app.get('/api/secure-files/*', authenticateToken, async (req, res) => {
+app.get('/api/secure-files/*', async (req, res) => {
   try {
     const fileUrl = req.params[0]; // الحصول على باقي المسار
+    const token = req.query.token || req.headers.authorization?.replace('Bearer ', '');
+    
     console.log('🔍 secure-files - fileUrl:', fileUrl);
-    console.log('🔍 secure-files - user:', req.user._id);
+    console.log('🔍 secure-files - token:', token ? 'present' : 'missing');
+
+    if (!token) {
+      console.log('❌ secure-files - no token provided');
+      return res.status(401).json({ error: 'Access token required' });
+    }
+
+    // التحقق من صحة التوكن
+    let user;
+    try {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      user = await User.findById(decoded.userId);
+      if (!user) {
+        throw new Error('User not found');
+      }
+    } catch (error) {
+      console.log('❌ secure-files - invalid token:', error.message);
+      return res.status(401).json({ error: 'Invalid token' });
+    }
 
     // التحقق من أن الملف ينتمي لطبيب مسجل الدخول
-    const doctorId = req.user._id;
+    const doctorId = user._id;
     
     // البحث عن المريض الذي يحتوي على هذا الملف
     const patient = await Patient.findOne({
@@ -7169,8 +7190,28 @@ app.get('/api/secure-files/*', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'الملف غير موجود أو غير مخول للوصول إليه' });
     }
 
-    // إعادة توجيه إلى الملف الأصلي مع إضافة headers للأمان
-    res.redirect(fileUrl);
+    // تحميل الملف من Cloudinary وإرساله مباشرة
+    try {
+      const response = await fetch(fileUrl);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch file: ${response.status}`);
+      }
+      
+      const buffer = await response.buffer();
+      const contentType = response.headers.get('content-type') || 'application/octet-stream';
+      
+      res.set({
+        'Content-Type': contentType,
+        'Content-Length': buffer.length,
+        'Cache-Control': 'private, max-age=3600'
+      });
+      
+      res.send(buffer);
+    } catch (fetchError) {
+      console.error('Error fetching file from Cloudinary:', fetchError);
+      // في حالة فشل التحميل، إعادة توجيه للملف الأصلي
+      res.redirect(fileUrl);
+    }
 
   } catch (error) {
     console.error('خطأ في تحميل الملف الآمن:', error);
