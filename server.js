@@ -664,9 +664,12 @@ const Message = mongoose.model('Message', messageSchema);
 const notificationSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   doctorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Doctor' },
-  type: String,
+  type: String, // 'appointment', 'rating_comment', etc.
   message: String,
-  read: { type: Boolean, default: false },
+  isRead: { type: Boolean, default: false },
+  readAt: { type: Date },
+  ratingId: { type: mongoose.Schema.Types.ObjectId, ref: 'Rating' }, // ربط بالتقييم إذا كان إشعار تعليق
+  appointmentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Appointment' }, // ربط بالموعد إذا كان إشعار حجز
   createdAt: { type: Date, default: Date.now }
 });
 const Notification = mongoose.model('Notification', notificationSchema);
@@ -1475,6 +1478,18 @@ app.post('/ratings', async (req, res) => {
     // تحديث متوسط التقييم وعدد التقييمات للطبيب
     await updateDoctorRatingStats(doctorId);
     
+    // إرسال إشعار للطبيب عند تلقي تعليق جديد
+    if (comment && comment.trim()) {
+      const notification = new Notification({
+        doctorId: doctorId,
+        userId: userId,
+        type: 'rating_comment',
+        message: `تلقيت تعليقاً جديداً من ${user.first_name || 'مستخدم'}: "${comment.substring(0, 50)}${comment.length > 50 ? '...' : ''}"`,
+        ratingId: savedRating._id
+      });
+      await notification.save();
+    }
+    
     res.json({ 
       message: existingRating ? 'تم تحديث التقييم بنجاح' : 'تم إضافة التقييم بنجاح',
       rating: savedRating 
@@ -1489,11 +1504,50 @@ app.post('/ratings', async (req, res) => {
   }
 });
 
-// جلب تقييمات طبيب معين
+// جلب تقييمات طبيب معين (بدون التعليقات للعامة)
 app.get('/ratings/doctor/:doctorId', async (req, res) => {
   try {
     const { doctorId } = req.params;
     const { page = 1, limit = 10 } = req.query;
+    
+    const ratings = await Rating.find({ doctorId })
+      .populate('userId', 'first_name email')
+      .select('-comment') // إخفاء التعليقات من العرض العام
+      .sort({ createdAt: -1 })
+      .limit(limit * 1)
+      .skip((page - 1) * limit);
+    
+    const totalRatings = await Rating.countDocuments({ doctorId });
+    
+    res.json({
+      ratings,
+      totalRatings,
+      totalPages: Math.ceil(totalRatings / limit),
+      currentPage: page
+    });
+    
+  } catch (err) {
+    console.error('❌ Get ratings error:', err);
+    res.status(500).json({ error: 'حدث خطأ أثناء جلب التقييمات' });
+  }
+});
+
+// جلب تقييمات طبيب معين مع التعليقات (للطبيب فقط)
+app.get('/ratings/doctor/:doctorId/private', authenticateToken, async (req, res) => {
+  try {
+    const { doctorId } = req.params;
+    const { page = 1, limit = 10 } = req.query;
+    
+    // التحقق من أن المستخدم هو الطبيب نفسه
+    const doctor = await Doctor.findById(doctorId);
+    if (!doctor) {
+      return res.status(404).json({ error: 'الطبيب غير موجود' });
+    }
+    
+    // التحقق من أن المستخدم الحالي هو الطبيب نفسه
+    if (req.user.userId !== doctorId) {
+      return res.status(403).json({ error: 'غير مصرح لك بالوصول لهذه البيانات' });
+    }
     
     const ratings = await Rating.find({ doctorId })
       .populate('userId', 'first_name email')
@@ -1511,8 +1565,8 @@ app.get('/ratings/doctor/:doctorId', async (req, res) => {
     });
     
   } catch (err) {
-    console.error('❌ Get ratings error:', err);
-    res.status(500).json({ error: 'حدث خطأ أثناء جلب التقييمات' });
+    console.error('❌ Get private ratings error:', err);
+    res.status(500).json({ error: 'حدث خطأ أثناء جلب التقييمات الخاصة' });
   }
 });
 
@@ -1575,6 +1629,62 @@ async function updateDoctorRatingStats(doctorId) {
     console.error('❌ Update doctor rating stats error:', err);
   }
 }
+
+// جلب إشعارات الطبيب
+app.get('/notifications/doctor/:doctorId', authenticateToken, async (req, res) => {
+  try {
+    const { doctorId } = req.params;
+    const { page = 1, limit = 20 } = req.query;
+    
+    // التحقق من أن المستخدم هو الطبيب نفسه
+    if (req.user.userId !== doctorId) {
+      return res.status(403).json({ error: 'غير مصرح لك بالوصول لهذه البيانات' });
+    }
+    
+    const notifications = await Notification.find({ doctorId })
+      .populate('userId', 'first_name email')
+      .populate('ratingId')
+      .sort({ createdAt: -1 })
+      .limit(limit * 1)
+      .skip((page - 1) * limit);
+    
+    const totalNotifications = await Notification.countDocuments({ doctorId });
+    
+    res.json({
+      notifications,
+      totalNotifications,
+      totalPages: Math.ceil(totalNotifications / limit),
+      currentPage: page
+    });
+    
+  } catch (err) {
+    console.error('❌ Get doctor notifications error:', err);
+    res.status(500).json({ error: 'حدث خطأ أثناء جلب الإشعارات' });
+  }
+});
+
+// تحديث حالة الإشعار كمقروء
+app.put('/notifications/:notificationId/read', authenticateToken, async (req, res) => {
+  try {
+    const { notificationId } = req.params;
+    
+    const notification = await Notification.findByIdAndUpdate(
+      notificationId,
+      { isRead: true, readAt: new Date() },
+      { new: true }
+    );
+    
+    if (!notification) {
+      return res.status(404).json({ error: 'الإشعار غير موجود' });
+    }
+    
+    res.json({ message: 'تم تحديث حالة الإشعار', notification });
+    
+  } catch (err) {
+    console.error('❌ Update notification error:', err);
+    res.status(500).json({ error: 'حدث خطأ أثناء تحديث الإشعار' });
+  }
+});
 
 // جلب جميع الأطباء (للإدارة - يشمل المعلقين مع جميع البيانات) - محمي بـ JWT
 app.get('/admin/doctors', authenticateToken, requireUserType(['admin']), async (req, res) => {
