@@ -7145,6 +7145,39 @@ app.get('/doctors/me/patients/stats', authenticateToken, requireUserType(['docto
 
 // ===== نهاية نقاط النهاية لإدارة المرضى =====
 
+// ===== تحميل ملفات PDF مع التوكن =====
+app.get('/api/secure-files/*', authenticateToken, async (req, res) => {
+  try {
+    const fileUrl = req.params[0]; // الحصول على باقي المسار
+    console.log('🔍 secure-files - fileUrl:', fileUrl);
+    console.log('🔍 secure-files - user:', req.user._id);
+
+    // التحقق من أن الملف ينتمي لطبيب مسجل الدخول
+    const doctorId = req.user._id;
+    
+    // البحث عن المريض الذي يحتوي على هذا الملف
+    const patient = await Patient.findOne({
+      doctorId,
+      $or: [
+        { 'medicalReports.fileUrl': { $regex: fileUrl } },
+        { 'examinations.fileUrl': { $regex: fileUrl } }
+      ]
+    });
+
+    if (!patient) {
+      console.log('❌ secure-files - file not found or not owned by doctor');
+      return res.status(404).json({ error: 'الملف غير موجود أو غير مخول للوصول إليه' });
+    }
+
+    // إعادة توجيه إلى الملف الأصلي مع إضافة headers للأمان
+    res.redirect(fileUrl);
+
+  } catch (error) {
+    console.error('خطأ في تحميل الملف الآمن:', error);
+    res.status(500).json({ error: 'خطأ في تحميل الملف' });
+  }
+});
+
 // ===== 404 Handler - يجب أن يكون في النهاية =====
 app.use('*', (req, res) => {
   console.log('🚫 404 - Endpoint not found:', req.method, req.originalUrl);
