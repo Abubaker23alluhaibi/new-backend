@@ -413,6 +413,70 @@ setInterval(cleanupOldFiles, 60 * 60 * 1000);
 // تنظيف الملفات عند بدء التطبيق
 cleanupOldFiles();
 
+// تسجيل الغياب التلقائي في نهاية اليوم (كل يوم في الساعة 23:59)
+const scheduleDailyAbsentMarking = () => {
+  const now = new Date();
+  const tomorrow = new Date(now);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  tomorrow.setHours(23, 59, 0, 0); // 23:59:00.000
+  
+  const timeUntilMidnight = tomorrow.getTime() - now.getTime();
+  
+  console.log(`⏰ تم جدولة تسجيل الغياب التلقائي في: ${tomorrow.toLocaleString('ar-EG')}`);
+  
+  setTimeout(() => {
+    markAbsentForToday();
+    
+    // جدولة المهمة التالية (كل 24 ساعة)
+    setInterval(markAbsentForToday, 24 * 60 * 60 * 1000);
+  }, timeUntilMidnight);
+};
+
+// دالة تسجيل الغياب لليوم
+const markAbsentForToday = async () => {
+  try {
+    const today = new Date();
+    const todayString = today.toISOString().split('T')[0]; // YYYY-MM-DD format
+    
+    console.log(`🕐 بدء تسجيل الغياب التلقائي لليوم: ${todayString}`);
+    
+    // البحث عن المواعيد التي لم يتم تسجيل حضورها اليوم
+    const appointmentsToMarkAbsent = await Appointment.find({
+      date: todayString,
+      attendance: { $in: ['not_set', null] },
+      status: { $in: ['pending', 'confirmed'] }
+    });
+    
+    if (appointmentsToMarkAbsent.length === 0) {
+      console.log(`✅ لا توجد مواعيد تحتاج لتسجيل غياب في ${todayString}`);
+      return;
+    }
+    
+    // تسجيل الغياب للمواعيد
+    const updateResult = await Appointment.updateMany(
+      {
+        date: todayString,
+        attendance: { $in: ['not_set', null] },
+        status: { $in: ['pending', 'confirmed'] }
+      },
+      {
+        $set: { 
+          attendance: 'absent',
+          status: 'completed' // تغيير حالة الموعد إلى مكتمل
+        }
+      }
+    );
+    
+    console.log(`✅ تم تسجيل الغياب التلقائي لـ ${updateResult.modifiedCount} موعد في ${todayString}`);
+    
+  } catch (error) {
+    console.error('❌ خطأ في تسجيل الغياب التلقائي:', error);
+  }
+};
+
+// بدء جدولة تسجيل الغياب التلقائي
+scheduleDailyAbsentMarking();
+
 // إعداد Cloudinary
 if (process.env.CLOUDINARY_URL) {
   try {
