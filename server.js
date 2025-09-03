@@ -2302,6 +2302,22 @@ app.post('/appointments', async (req, res) => {
         message: notificationMessage
       });
 
+      // إرسال إشعار فوري عبر WebSocket للدكتور
+      if (io) {
+        io.to(`doctor_${doctorId}`).emit('new_appointment', {
+          appointmentId: appointment._id,
+          patientName: finalPatientName,
+          bookerName: finalBookerName,
+          date: date,
+          time: time,
+          reason: reason,
+          patientAge: patientAge,
+          isBookingForOther: isBookingForOther,
+          message: notificationMessage
+        });
+        console.log(`📱 تم إرسال إشعار فوري للدكتور ${doctorId} عن موعد جديد`);
+      }
+
     } catch (notificationError) {
       // لا نوقف العملية إذا فشل إنشاء الإشعار
       console.error('❌ Notification error:', notificationError);
@@ -2463,6 +2479,22 @@ app.post('/appointments-for-other', async (req, res) => {
         type: 'new_appointment',
         message: notificationMessage
       });
+
+      // إرسال إشعار فوري عبر WebSocket للدكتور
+      if (io) {
+        io.to(`doctor_${doctorId}`).emit('new_appointment', {
+          appointmentId: appointment._id,
+          patientName: patientName,
+          bookerName: bookerName || userName,
+          date: date,
+          time: time,
+          reason: reason,
+          patientAge: patientAge,
+          isBookingForOther: true,
+          message: notificationMessage
+        });
+        console.log(`📱 تم إرسال إشعار فوري للدكتور ${doctorId} عن موعد جديد (لشخص آخر)`);
+      }
 
     } catch (notificationError) {
       // لا نوقف العملية إذا فشل إنشاء الإشعار
@@ -5312,6 +5344,20 @@ app.post('/add-special-appointment', async (req, res) => {
           read: false
         });
         await notification.save();
+
+        // إرسال إشعار فوري عبر WebSocket للمريض
+        if (io) {
+          io.to(`user_${foundUser._id}`).emit('special_appointment', {
+            appointmentId: appointment._id,
+            doctorName: doctorName,
+            date: date,
+            time: time,
+            reason: reason,
+            notes: notes,
+            message: `تم حجز موعد خاص لك مع الطبيب ${doctorName} بتاريخ ${date} الساعة ${time}`
+          });
+          console.log(`📱 تم إرسال إشعار فوري للمريض ${foundUser._id} عن موعد خاص`);
+        }
       }
       // أرسل إشعار أيضًا عبر دالة الإشعار المركزية
       const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
