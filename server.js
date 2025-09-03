@@ -26,8 +26,44 @@ const rateLimit = require('express-rate-limit');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const axios = require('axios');
+const http = require('http');
+const socketIo = require('socket.io');
 
 const app = express();
+const server = http.createServer(app);
+
+// إعداد Socket.IO
+const io = socketIo(server, {
+  cors: {
+    origin: process.env.CORS_ORIGIN || "*",
+    methods: ["GET", "POST"]
+  }
+});
+
+// جعل io متاحاً عالمياً
+global.io = io;
+
+// معالجة اتصالات WebSocket
+io.on('connection', (socket) => {
+  console.log('👤 مستخدم متصل:', socket.id);
+  
+  // انضمام المستخدم إلى غرفة خاصة
+  socket.on('join_user_room', (userId) => {
+    socket.join(`user_${userId}`);
+    console.log(`👤 المستخدم ${userId} انضم إلى غرفته الخاصة`);
+  });
+  
+  // انضمام الطبيب إلى غرفة خاصة
+  socket.on('join_doctor_room', (doctorId) => {
+    socket.join(`doctor_${doctorId}`);
+    console.log(`👨‍⚕️ الطبيب ${doctorId} انضم إلى غرفته الخاصة`);
+  });
+  
+  // معالجة انقطاع الاتصال
+  socket.on('disconnect', () => {
+    console.log('👤 مستخدم منقطع:', socket.id);
+  });
+});
 
 // ===== Health Check Endpoints (يجب أن تكون في البداية) =====
 app.get('/health', (req, res) => {
@@ -2574,10 +2610,26 @@ app.delete('/appointments/:id', async (req, res) => {
       const patientNotification = await Notification.create({
         userId: appointment.userId,
         type: 'appointment_cancelled',
-        message: notificationMessage
+        message: notificationMessage,
+        priority: 'high', // إشعار عالي الأولوية
+        immediate: true   // إشعار فوري
       });
       
       console.log(`✅ تم إرسال إشعار إلغاء الموعد للمريض: ${appointment.patientName || appointment.userName}`);
+      
+      // إرسال إشعار فوري عبر WebSocket (إذا كان متاحاً)
+      if (global.io) {
+        global.io.to(`user_${appointment.userId}`).emit('appointment_cancelled', {
+          type: 'appointment_cancelled',
+          message: notificationMessage,
+          appointmentId: appointment._id,
+          doctorName: appointment.doctorName,
+          date: appointment.date,
+          time: appointment.time,
+          timestamp: new Date().toISOString()
+        });
+        console.log(`📡 تم إرسال إشعار WebSocket للمستخدم: ${appointment.userId}`);
+      }
       
     } catch (notificationError) {
       // لا نوقف العملية إذا فشل إنشاء الإشعار
@@ -5023,10 +5075,11 @@ app.get('/medicine-reminders/:userId', async (req, res) => {
 const PORT = process.env.PORT || 5000;
 
 // Improved server startup with error handling
-const server = app.listen(PORT, '0.0.0.0', () => {
+server.listen(PORT, '0.0.0.0', () => {
   console.log('🚀 Server started successfully!');
   console.log(`🌐 Server running on port ${PORT}`);
   console.log(`🔗 Health check: http://localhost:${PORT}/health`);
+  console.log(`🔌 WebSocket server is running`);
   console.log(`🔗 API Health check: http://localhost:${PORT}/api/health`);
   console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`⏰ Started at: ${new Date().toISOString()}`);
