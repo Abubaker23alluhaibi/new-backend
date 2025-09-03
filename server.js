@@ -3804,6 +3804,55 @@ app.put('/api/appointments/:id/attendance', async (req, res) => {
   }
 });
 
+// تسجيل الغياب التلقائي للمواعيد في نهاية اليوم
+app.post('/api/appointments/mark-absent-end-of-day', async (req, res) => {
+  try {
+    const today = new Date();
+    const todayString = today.toISOString().split('T')[0]; // YYYY-MM-DD format
+    
+    // البحث عن المواعيد التي لم يتم تسجيل حضورها اليوم
+    const appointmentsToMarkAbsent = await Appointment.find({
+      date: todayString,
+      attendance: { $in: ['not_set', null] },
+      status: { $in: ['pending', 'confirmed'] }
+    });
+    
+    if (appointmentsToMarkAbsent.length === 0) {
+      return res.json({ 
+        message: 'لا توجد مواعيد تحتاج لتسجيل غياب', 
+        markedCount: 0 
+      });
+    }
+    
+    // تسجيل الغياب للمواعيد
+    const updateResult = await Appointment.updateMany(
+      {
+        date: todayString,
+        attendance: { $in: ['not_set', null] },
+        status: { $in: ['pending', 'confirmed'] }
+      },
+      {
+        $set: { 
+          attendance: 'absent',
+          status: 'completed' // تغيير حالة الموعد إلى مكتمل
+        }
+      }
+    );
+    
+    console.log(`✅ تم تسجيل الغياب التلقائي لـ ${updateResult.modifiedCount} موعد في ${todayString}`);
+    
+    res.json({ 
+      message: `تم تسجيل الغياب التلقائي لـ ${updateResult.modifiedCount} موعد`,
+      markedCount: updateResult.modifiedCount,
+      date: todayString
+    });
+    
+  } catch (error) {
+    console.error('❌ خطأ في تسجيل الغياب التلقائي:', error);
+    res.status(500).json({ error: 'خطأ في تسجيل الغiاب التلقائي' });
+  }
+});
+
 // جلب التحليل والإحصائيات
 app.get('/api/analytics', async (req, res) => {
   try {
