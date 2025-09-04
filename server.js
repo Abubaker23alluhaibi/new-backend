@@ -2317,6 +2317,22 @@ app.post('/appointments', async (req, res) => {
         });
         console.log(`📱 تم إرسال إشعار فوري للدكتور ${doctorId} عن موعد جديد`);
       }
+      
+      // إرسال إشعار عبر WebSocket الجديد للدكتور أيضاً
+      sendWebSocketNotification(doctorId, {
+        type: 'new_appointment',
+        title: 'موعد جديد',
+        body: notificationMessage,
+        appointmentId: appointment._id,
+        patientName: finalPatientName,
+        bookerName: finalBookerName,
+        date: date,
+        time: time,
+        reason: reason,
+        patientAge: patientAge,
+        isBookingForOther: isBookingForOther,
+        timestamp: new Date().toISOString()
+      });
 
     } catch (notificationError) {
       // لا نوقف العملية إذا فشل إنشاء الإشعار
@@ -2727,6 +2743,18 @@ app.delete('/appointments/:id', async (req, res) => {
         console.log(`📡 تم إرسال إشعار WebSocket للمستخدم: ${appointment.userId}`);
       }
       
+      // إرسال إشعار عبر WebSocket الجديد أيضاً
+      sendWebSocketNotification(appointment.userId, {
+        type: 'appointment_cancelled',
+        title: 'تم إلغاء الموعد',
+        body: notificationMessage,
+        appointmentId: appointment._id,
+        doctorName: appointment.doctorName,
+        date: appointment.date,
+        time: appointment.time,
+        timestamp: new Date().toISOString()
+      });
+      
     } catch (notificationError) {
       // لا نوقف العملية إذا فشل إنشاء الإشعار
       console.error('❌ Notification error:', notificationError);
@@ -3059,6 +3087,81 @@ app.get('/notifications', async (req, res) => {
     res.status(500).json({ error: 'حدث خطأ أثناء جلب الإشعارات' });
   }
 });
+
+// WebSocket endpoint للإشعارات الفورية
+app.get('/notifications/ws/:userId', (req, res) => {
+  const { userId } = req.params;
+  
+  // إعداد headers للـ WebSocket
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Cache-Control'
+  });
+
+  console.log(`🔌 WebSocket connection established for user: ${userId}`);
+
+  // إرسال رسالة ترحيب
+  res.write(`data: ${JSON.stringify({ 
+    type: 'connected', 
+    message: 'تم الاتصال بنجاح',
+    userId: userId,
+    timestamp: new Date().toISOString()
+  })}\n\n`);
+
+  // إضافة المستخدم إلى قائمة المستمعين
+  if (!global.websocketClients) {
+    global.websocketClients = new Map();
+  }
+  
+  global.websocketClients.set(userId, res);
+
+  // إرسال ping كل 30 ثانية للحفاظ على الاتصال
+  const pingInterval = setInterval(() => {
+    try {
+      res.write(`data: ${JSON.stringify({ 
+        type: 'ping', 
+        timestamp: new Date().toISOString() 
+      })}\n\n`);
+    } catch (error) {
+      console.log(`❌ Error sending ping to user ${userId}:`, error);
+      clearInterval(pingInterval);
+      global.websocketClients?.delete(userId);
+    }
+  }, 30000);
+
+  // معالجة انقطاع الاتصال
+  req.on('close', () => {
+    console.log(`🔌 WebSocket connection closed for user: ${userId}`);
+    clearInterval(pingInterval);
+    global.websocketClients?.delete(userId);
+  });
+
+  req.on('error', (error) => {
+    console.log(`❌ WebSocket error for user ${userId}:`, error);
+    clearInterval(pingInterval);
+    global.websocketClients?.delete(userId);
+  });
+});
+
+// دالة مساعدة لإرسال إشعار عبر WebSocket
+const sendWebSocketNotification = (userId, notification) => {
+  const client = global.websocketClients?.get(userId);
+  if (client) {
+    try {
+      client.write(`data: ${JSON.stringify(notification)}\n\n`);
+      console.log(`📡 تم إرسال إشعار WebSocket للمستخدم: ${userId}`);
+      return true;
+    } catch (error) {
+      console.log(`❌ خطأ في إرسال إشعار WebSocket للمستخدم ${userId}:`, error);
+      global.websocketClients?.delete(userId);
+      return false;
+    }
+  }
+  return false;
+};
 
 // نقطة نهائية لاختبار إنشاء إشعار
 app.post('/test-notification', async (req, res) => {
