@@ -5022,6 +5022,30 @@ const patientSchema = new mongoose.Schema({
 
 const Patient = mongoose.models.Patient || mongoose.model('Patient', patientSchema);
 
+// مخطط الأدوية والوصفات الطبية
+const medicationSchema = new mongoose.Schema({
+  doctorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Doctor', required: true },
+  doctorName: { type: String, required: true },
+  patientId: { type: mongoose.Schema.Types.ObjectId, ref: 'Patient', required: true },
+  patientName: { type: String, required: true },
+  patientPhone: { type: String, required: true },
+  diagnosis: String, // التشخيص
+  medications: [{
+    name: { type: String, required: true },
+    dosage: { type: String, required: true },
+    frequency: { type: String, required: true },
+    duration: { type: String, required: true },
+    instructions: String // تعليمات خاصة
+  }],
+  notes: String, // ملاحظات إضافية
+  date: { type: Date, default: Date.now },
+  isActive: { type: Boolean, default: true }
+}, {
+  timestamps: true
+});
+
+const Medication = mongoose.models.Medication || mongoose.model('Medication', medicationSchema);
+
 // ===== نقاط نهائية إدارة الموظفين =====
 
 // دالة إنشاء رمز دخول عشوائي
@@ -7765,6 +7789,221 @@ app.get('/doctors/me/patients/stats', authenticateToken, requireUserType(['docto
 });
 
 // ===== نهاية نقاط النهاية لإدارة المرضى =====
+
+// ===== نقاط النهاية لإدارة الأدوية والوصفات الطبية =====
+
+// جلب أدوية مريض محدد
+app.get('/medications/patient/:patientId', async (req, res) => {
+  try {
+    const { patientId } = req.params;
+    
+    // التحقق من صحة معرف المريض
+    if (!mongoose.Types.ObjectId.isValid(patientId)) {
+      return res.status(400).json({ error: 'معرف المريض غير صحيح' });
+    }
+
+    // جلب الأدوية مرتبة حسب التاريخ (الأحدث أولاً)
+    const medications = await Medication.find({ 
+      patientId: patientId,
+      isActive: true 
+    }).sort({ date: -1 });
+
+    res.json({ 
+      success: true,
+      medications: medications 
+    });
+  } catch (error) {
+    console.error('Error fetching patient medications:', error);
+    res.status(500).json({ error: 'خطأ في جلب الأدوية' });
+  }
+});
+
+// جلب أدوية الدكتور
+app.get('/medications/doctor/:doctorId', async (req, res) => {
+  try {
+    const { doctorId } = req.params;
+    
+    // التحقق من صحة معرف الدكتور
+    if (!mongoose.Types.ObjectId.isValid(doctorId)) {
+      return res.status(400).json({ error: 'معرف الطبيب غير صحيح' });
+    }
+
+    // جلب الأدوية مرتبة حسب التاريخ (الأحدث أولاً)
+    const medications = await Medication.find({ 
+      doctorId: doctorId,
+      isActive: true 
+    }).sort({ date: -1 });
+
+    res.json({ 
+      success: true,
+      medications: medications 
+    });
+  } catch (error) {
+    console.error('Error fetching doctor medications:', error);
+    res.status(500).json({ error: 'خطأ في جلب الأدوية' });
+  }
+});
+
+// إضافة وصفة طبية جديدة
+app.post('/medications', async (req, res) => {
+  try {
+    const {
+      doctorId,
+      doctorName,
+      patientId,
+      patientName,
+      patientPhone,
+      diagnosis,
+      medications,
+      notes,
+      date
+    } = req.body;
+
+    // التحقق من البيانات المطلوبة
+    if (!doctorId || !patientId || !medications || medications.length === 0) {
+      return res.status(400).json({ 
+        error: 'يرجى إدخال جميع البيانات المطلوبة' 
+      });
+    }
+
+    // التحقق من صحة معرفات الدكتور والمريض
+    if (!mongoose.Types.ObjectId.isValid(doctorId)) {
+      return res.status(400).json({ error: 'معرف الطبيب غير صحيح' });
+    }
+    
+    if (!mongoose.Types.ObjectId.isValid(patientId)) {
+      return res.status(400).json({ error: 'معرف المريض غير صحيح' });
+    }
+
+    // التحقق من وجود الدكتور
+    const doctor = await Doctor.findById(doctorId);
+    if (!doctor) {
+      return res.status(404).json({ error: 'الطبيب غير موجود' });
+    }
+
+    // التحقق من وجود المريض
+    const patient = await Patient.findById(patientId);
+    if (!patient) {
+      return res.status(404).json({ error: 'المريض غير موجود' });
+    }
+
+    // إنشاء الوصفة الطبية
+    const medication = new Medication({
+      doctorId,
+      doctorName: doctorName || doctor.first_name || 'دكتور',
+      patientId,
+      patientName: patientName || patient.name,
+      patientPhone: patientPhone || patient.phone,
+      diagnosis,
+      medications,
+      notes,
+      date: date ? new Date(date) : new Date()
+    });
+
+    await medication.save();
+
+    res.status(201).json({
+      success: true,
+      message: 'تم إضافة الوصفة الطبية بنجاح',
+      medication: medication
+    });
+  } catch (error) {
+    console.error('Error adding medication:', error);
+    res.status(500).json({ error: 'خطأ في إضافة الوصفة الطبية' });
+  }
+});
+
+// تحديث وصفة طبية
+app.put('/medications/:medicationId', async (req, res) => {
+  try {
+    const { medicationId } = req.params;
+    const updateData = req.body;
+
+    // التحقق من صحة معرف الوصفة
+    if (!mongoose.Types.ObjectId.isValid(medicationId)) {
+      return res.status(400).json({ error: 'معرف الوصفة غير صحيح' });
+    }
+
+    // تحديث الوصفة
+    const medication = await Medication.findByIdAndUpdate(
+      medicationId,
+      { ...updateData, updatedAt: new Date() },
+      { new: true, runValidators: true }
+    );
+
+    if (!medication) {
+      return res.status(404).json({ error: 'الوصفة الطبية غير موجودة' });
+    }
+
+    res.json({
+      success: true,
+      message: 'تم تحديث الوصفة الطبية بنجاح',
+      medication: medication
+    });
+  } catch (error) {
+    console.error('Error updating medication:', error);
+    res.status(500).json({ error: 'خطأ في تحديث الوصفة الطبية' });
+  }
+});
+
+// حذف وصفة طبية (تعطيل)
+app.delete('/medications/:medicationId', async (req, res) => {
+  try {
+    const { medicationId } = req.params;
+
+    // التحقق من صحة معرف الوصفة
+    if (!mongoose.Types.ObjectId.isValid(medicationId)) {
+      return res.status(400).json({ error: 'معرف الوصفة غير صحيح' });
+    }
+
+    // تعطيل الوصفة بدلاً من حذفها
+    const medication = await Medication.findByIdAndUpdate(
+      medicationId,
+      { isActive: false, updatedAt: new Date() },
+      { new: true }
+    );
+
+    if (!medication) {
+      return res.status(404).json({ error: 'الوصفة الطبية غير موجودة' });
+    }
+
+    res.json({
+      success: true,
+      message: 'تم حذف الوصفة الطبية بنجاح'
+    });
+  } catch (error) {
+    console.error('Error deleting medication:', error);
+    res.status(500).json({ error: 'خطأ في حذف الوصفة الطبية' });
+  }
+});
+
+// جلب وصفة طبية محددة
+app.get('/medications/:medicationId', async (req, res) => {
+  try {
+    const { medicationId } = req.params;
+
+    // التحقق من صحة معرف الوصفة
+    if (!mongoose.Types.ObjectId.isValid(medicationId)) {
+      return res.status(400).json({ error: 'معرف الوصفة غير صحيح' });
+    }
+
+    const medication = await Medication.findById(medicationId);
+
+    if (!medication) {
+      return res.status(404).json({ error: 'الوصفة الطبية غير موجودة' });
+    }
+
+    res.json({
+      success: true,
+      medication: medication
+    });
+  } catch (error) {
+    console.error('Error fetching medication:', error);
+    res.status(500).json({ error: 'خطأ في جلب الوصفة الطبية' });
+  }
+});
+
+// ===== نهاية نقاط النهاية لإدارة الأدوية والوصفات الطبية =====
 
 // ===== تحميل ملفات PDF مع التوكن =====
 app.get('/api/secure-files/*', (req, res, next) => {
