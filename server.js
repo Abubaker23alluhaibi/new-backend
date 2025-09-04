@@ -7792,6 +7792,46 @@ app.get('/doctors/me/patients/stats', authenticateToken, requireUserType(['docto
 
 // ===== نقاط النهاية لإدارة الأدوية والوصفات الطبية =====
 
+// جلب قوائم الاختيارات للأدوية
+app.get('/medications/options', (req, res) => {
+  try {
+    const options = {
+      dosages: [
+        '250 مجم', '500 مجم', '750 مجم', '1000 مجم',
+        '5 مل', '10 مل', '15 مل', '20 مل',
+        '1 حبة', '2 حبة', '3 حبة'
+      ],
+      frequencies: [
+        'مرة واحدة يومياً', 'مرتين يومياً', '3 مرات يومياً', '4 مرات يومياً',
+        'كل 6 ساعات', 'كل 8 ساعات', 'كل 12 ساعة',
+        'عند الحاجة'
+      ],
+      durations: [
+        '3 أيام', '5 أيام', '7 أيام', '10 أيام',
+        '14 يوم', '21 يوم', 'شهر واحد', 'شهرين',
+        '3 أشهر', '6 أشهر', 'سنة واحدة', 'مستمر'
+      ],
+      commonMedications: [
+        'باراسيتامول', 'إيبوبروفين', 'أموكسيسيلين', 'أزيثرومايسين',
+        'سيفالكسين', 'ديكلوفيناك', 'أوميبرازول', 'رانيتيدين',
+        'لوراتادين', 'سيتريزين', 'فيتامين د', 'كالسيوم',
+        'حديد', 'فوليك أسيد', 'ميتفورمين', 'جلوكوفاج',
+        'أسبرين', 'وارفارين', 'أتينولول', 'أملوديبين',
+        'هيدروكلوروثيازيد', 'فوروسيميد', 'سبيرونولاكتون',
+        'ليثيوم', 'فلوكستين', 'سيرترالين', 'ألبرازولام'
+      ]
+    };
+    
+    res.json({
+      success: true,
+      options: options
+    });
+  } catch (error) {
+    console.error('Error fetching medication options:', error);
+    res.status(500).json({ error: 'خطأ في جلب قوائم الاختيارات' });
+  }
+});
+
 // جلب أدوية مريض محدد
 app.get('/medications/patient/:patientId', async (req, res) => {
   try {
@@ -7864,6 +7904,54 @@ app.post('/medications', async (req, res) => {
       return res.status(400).json({ 
         error: 'يرجى إدخال جميع البيانات المطلوبة' 
       });
+    }
+
+    // قوائم الاختيارات الصحيحة
+    const validDosages = [
+      '250 مجم', '500 مجم', '750 مجم', '1000 مجم',
+      '5 مل', '10 مل', '15 مل', '20 مل',
+      '1 حبة', '2 حبة', '3 حبة'
+    ];
+    
+    const validFrequencies = [
+      'مرة واحدة يومياً', 'مرتين يومياً', '3 مرات يومياً', '4 مرات يومياً',
+      'كل 6 ساعات', 'كل 8 ساعات', 'كل 12 ساعة',
+      'عند الحاجة'
+    ];
+    
+    const validDurations = [
+      '3 أيام', '5 أيام', '7 أيام', '10 أيام',
+      '14 يوم', '21 يوم', 'شهر واحد', 'شهرين',
+      '3 أشهر', '6 أشهر', 'سنة واحدة', 'مستمر'
+    ];
+
+    // التحقق من صحة بيانات الأدوية
+    for (let i = 0; i < medications.length; i++) {
+      const med = medications[i];
+      
+      if (!med.name || !med.dosage || !med.frequency || !med.duration) {
+        return res.status(400).json({ 
+          error: `يرجى إدخال جميع البيانات المطلوبة للدواء ${i + 1}` 
+        });
+      }
+      
+      if (!validDosages.includes(med.dosage)) {
+        return res.status(400).json({ 
+          error: `الجرعة المحددة للدواء ${i + 1} غير صحيحة` 
+        });
+      }
+      
+      if (!validFrequencies.includes(med.frequency)) {
+        return res.status(400).json({ 
+          error: `التكرار المحدد للدواء ${i + 1} غير صحيح` 
+        });
+      }
+      
+      if (!validDurations.includes(med.duration)) {
+        return res.status(400).json({ 
+          error: `المدة المحددة للدواء ${i + 1} غير صحيحة` 
+        });
+      }
     }
 
     // التحقق من صحة معرفات الدكتور والمريض
@@ -8000,6 +8088,126 @@ app.get('/medications/:medicationId', async (req, res) => {
   } catch (error) {
     console.error('Error fetching medication:', error);
     res.status(500).json({ error: 'خطأ في جلب الوصفة الطبية' });
+  }
+});
+
+// إحصائيات الأدوية للدكتور
+app.get('/medications/doctor/:doctorId/stats', async (req, res) => {
+  try {
+    const { doctorId } = req.params;
+    
+    // التحقق من صحة معرف الدكتور
+    if (!mongoose.Types.ObjectId.isValid(doctorId)) {
+      return res.status(400).json({ error: 'معرف الطبيب غير صحيح' });
+    }
+
+    // إحصائيات عامة
+    const totalPrescriptions = await Medication.countDocuments({ 
+      doctorId: doctorId,
+      isActive: true 
+    });
+    
+    const totalMedications = await Medication.aggregate([
+      { $match: { doctorId: new mongoose.Types.ObjectId(doctorId), isActive: true } },
+      { $unwind: '$medications' },
+      { $count: 'total' }
+    ]);
+
+    // أكثر الأدوية استخداماً
+    const mostUsedMedications = await Medication.aggregate([
+      { $match: { doctorId: new mongoose.Types.ObjectId(doctorId), isActive: true } },
+      { $unwind: '$medications' },
+      { $group: { 
+        _id: '$medications.name', 
+        count: { $sum: 1 },
+        totalDosage: { $sum: 1 }
+      }},
+      { $sort: { count: -1 } },
+      { $limit: 10 }
+    ]);
+
+    // إحصائيات حسب الشهر
+    const monthlyStats = await Medication.aggregate([
+      { $match: { doctorId: new mongoose.Types.ObjectId(doctorId), isActive: true } },
+      { $group: {
+        _id: {
+          year: { $year: '$date' },
+          month: { $month: '$date' }
+        },
+        count: { $sum: 1 }
+      }},
+      { $sort: { '_id.year': -1, '_id.month': -1 } },
+      { $limit: 12 }
+    ]);
+
+    // إحصائيات حسب التشخيص
+    const diagnosisStats = await Medication.aggregate([
+      { $match: { 
+        doctorId: new mongoose.Types.ObjectId(doctorId), 
+        isActive: true,
+        diagnosis: { $exists: true, $ne: '' }
+      }},
+      { $group: {
+        _id: '$diagnosis',
+        count: { $sum: 1 }
+      }},
+      { $sort: { count: -1 } },
+      { $limit: 10 }
+    ]);
+
+    res.json({
+      success: true,
+      stats: {
+        totalPrescriptions,
+        totalMedications: totalMedications[0]?.total || 0,
+        mostUsedMedications,
+        monthlyStats,
+        diagnosisStats
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching medication stats:', error);
+    res.status(500).json({ error: 'خطأ في جلب إحصائيات الأدوية' });
+  }
+});
+
+// البحث في الأدوية
+app.get('/medications/search', async (req, res) => {
+  try {
+    const { q, doctorId, patientId } = req.query;
+    
+    if (!q || q.length < 2) {
+      return res.status(400).json({ error: 'يرجى إدخال كلمة بحث صحيحة' });
+    }
+
+    let matchQuery = {
+      isActive: true,
+      $or: [
+        { 'medications.name': { $regex: q, $options: 'i' } },
+        { diagnosis: { $regex: q, $options: 'i' } },
+        { notes: { $regex: q, $options: 'i' } }
+      ]
+    };
+
+    if (doctorId && mongoose.Types.ObjectId.isValid(doctorId)) {
+      matchQuery.doctorId = new mongoose.Types.ObjectId(doctorId);
+    }
+
+    if (patientId && mongoose.Types.ObjectId.isValid(patientId)) {
+      matchQuery.patientId = new mongoose.Types.ObjectId(patientId);
+    }
+
+    const medications = await Medication.find(matchQuery)
+      .sort({ date: -1 })
+      .limit(50);
+
+    res.json({
+      success: true,
+      medications: medications
+    });
+  } catch (error) {
+    console.error('Error searching medications:', error);
+    res.status(500).json({ error: 'خطأ في البحث في الأدوية' });
   }
 });
 
