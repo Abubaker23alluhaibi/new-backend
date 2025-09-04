@@ -7893,6 +7893,8 @@ app.get('/medications/doctor/:doctorId', async (req, res) => {
 app.post('/medications', async (req, res) => {
   try {
     console.log('🔍 POST /medications - Request body:', req.body);
+    console.log('🔍 POST /medications - Request body medications:', req.body.medications);
+    console.log('🔍 POST /medications - Request body medications length:', req.body.medications?.length);
     
     const {
       doctorId,
@@ -7908,6 +7910,7 @@ app.post('/medications', async (req, res) => {
     
     console.log('🔍 POST /medications - medications array:', medications);
     console.log('🔍 POST /medications - medications length:', medications?.length);
+    console.log('🔍 POST /medications - medications details:', JSON.stringify(medications, null, 2));
 
     // التحقق من البيانات المطلوبة
     if (!doctorId || !patientId || !medications || medications.length === 0) {
