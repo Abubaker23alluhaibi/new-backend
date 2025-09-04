@@ -7837,6 +7837,8 @@ app.get('/medications/patient/:patientId', async (req, res) => {
   try {
     const { patientId } = req.params;
     
+    console.log('🔍 GET /medications/patient/:patientId - patientId:', patientId);
+    
     // التحقق من صحة معرف المريض
     if (!mongoose.Types.ObjectId.isValid(patientId)) {
       return res.status(400).json({ error: 'معرف المريض غير صحيح' });
@@ -7847,6 +7849,9 @@ app.get('/medications/patient/:patientId', async (req, res) => {
       patientId: patientId,
       isActive: true 
     }).sort({ date: -1 });
+
+    console.log('🔍 GET /medications/patient/:patientId - Found medications:', medications.length);
+    console.log('🔍 GET /medications/patient/:patientId - Medications:', medications);
 
     res.json({ 
       success: true,
