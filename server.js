@@ -3088,17 +3088,32 @@ app.get('/notifications', async (req, res) => {
   }
 });
 
+// معالجة OPTIONS request للـ CORS
+app.options('/notifications/ws/:userId', (req, res) => {
+  res.writeHead(200, {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Cache-Control, Authorization, X-Requested-With',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Credentials': 'true',
+    'Access-Control-Max-Age': '86400'
+  });
+  res.end();
+});
+
 // WebSocket endpoint للإشعارات الفورية
 app.get('/notifications/ws/:userId', (req, res) => {
   const { userId } = req.params;
   
-  // إعداد headers للـ WebSocket
+  // إعداد headers للـ WebSocket مع CORS محسن
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
     'Connection': 'keep-alive',
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Cache-Control'
+    'Access-Control-Allow-Headers': 'Cache-Control, Authorization, X-Requested-With',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Credentials': 'true',
+    'X-Accel-Buffering': 'no' // مهم لـ Nginx
   });
 
   console.log(`🔌 WebSocket connection established for user: ${userId}`);
