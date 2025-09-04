@@ -7887,6 +7887,8 @@ app.get('/medications/doctor/:doctorId', async (req, res) => {
 // إضافة وصفة طبية جديدة
 app.post('/medications', async (req, res) => {
   try {
+    console.log('🔍 POST /medications - Request body:', req.body);
+    
     const {
       doctorId,
       doctorName,
@@ -7898,6 +7900,9 @@ app.post('/medications', async (req, res) => {
       notes,
       date
     } = req.body;
+    
+    console.log('🔍 POST /medications - medications array:', medications);
+    console.log('🔍 POST /medications - medications length:', medications?.length);
 
     // التحقق من البيانات المطلوبة
     if (!doctorId || !patientId || !medications || medications.length === 0) {
@@ -7988,7 +7993,12 @@ app.post('/medications', async (req, res) => {
       date: date ? new Date(date) : new Date()
     });
 
+    console.log('🔍 POST /medications - Created medication object:', medication);
+    console.log('🔍 POST /medications - Medications in object:', medication.medications);
+
     await medication.save();
+    
+    console.log('🔍 POST /medications - Saved medication:', medication);
 
     res.status(201).json({
       success: true,
