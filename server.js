@@ -7933,6 +7933,7 @@ app.post('/patients/:patientId/prescriptions', async (req, res) => {
     console.log('🔍 - medications is array from body:', Array.isArray(req.body.medications));
     
     // فحص تفصيلي للأدوية
+    let validMedications = [];
     if (medications && Array.isArray(medications)) {
       console.log('🔍 NEW API - Processing medications array with length:', medications.length);
       medications.forEach((med, index) => {
@@ -7946,13 +7947,14 @@ app.post('/patients/:patientId/prescriptions', async (req, res) => {
       });
       
       // فحص إضافي للتأكد من أن جميع الأدوية صحيحة
-      const validMedications = medications.filter(med => 
+      validMedications = medications.filter(med => 
         med.name && med.dosage && med.frequency && med.duration
       );
       console.log('🔍 NEW API - Valid medications count:', validMedications.length);
       console.log('🔍 NEW API - Valid medications:', validMedications);
     } else {
       console.log('🔍 NEW API - medications is not an array or is null/undefined');
+      validMedications = [];
     }
 
     // التحقق من صحة معرف المريض
@@ -7975,7 +7977,7 @@ app.post('/patients/:patientId/prescriptions', async (req, res) => {
       date: new Date(),
       diagnosis,
       notes,
-      medications: medications || [],
+      medications: validMedications.length > 0 ? validMedications : medications || [],
       isActive: true,
       createdBy: doctorId
     };
@@ -7985,6 +7987,9 @@ app.post('/patients/:patientId/prescriptions', async (req, res) => {
       medicationsCount: newPrescription.medications.length,
       medications: newPrescription.medications
     });
+    
+    console.log('🔍 NEW API - Using validMedications:', validMedications.length > 0);
+    console.log('🔍 NEW API - Final medications being saved:', newPrescription.medications);
     
     // فحص إضافي للتأكد من أن البيانات المحفوظة صحيحة
     console.log('🔍 NEW API - Prescription data validation before save:');
@@ -8001,8 +8006,24 @@ app.post('/patients/:patientId/prescriptions', async (req, res) => {
     console.log('🔍 - medications length:', newPrescription.medications.length);
 
     // إضافة الوصفة للمريض
+    console.log('🔍 NEW API - Before pushing prescription to patient:');
+    console.log('🔍 - patient.prescriptions length before:', patient.prescriptions.length);
+    console.log('🔍 - newPrescription medications count:', newPrescription.medications.length);
+    console.log('🔍 - newPrescription medications:', newPrescription.medications);
+    
     patient.prescriptions.push(newPrescription);
+    
+    console.log('🔍 NEW API - After pushing prescription to patient:');
+    console.log('🔍 - patient.prescriptions length after:', patient.prescriptions.length);
+    console.log('🔍 - last prescription medications count:', patient.prescriptions[patient.prescriptions.length - 1].medications.length);
+    console.log('🔍 - last prescription medications:', patient.prescriptions[patient.prescriptions.length - 1].medications);
+    
     await patient.save();
+    
+    console.log('🔍 NEW API - After saving patient:');
+    console.log('🔍 - patient.prescriptions length after save:', patient.prescriptions.length);
+    console.log('🔍 - last prescription medications count after save:', patient.prescriptions[patient.prescriptions.length - 1].medications.length);
+    console.log('🔍 - last prescription medications after save:', patient.prescriptions[patient.prescriptions.length - 1].medications);
 
     console.log('🔍 Added prescription to patient:', {
       patientId: patient._id,
@@ -8019,6 +8040,14 @@ app.post('/patients/:patientId/prescriptions', async (req, res) => {
       medicationsCount: savedPrescription?.medications?.length,
       medications: savedPrescription?.medications
     });
+    
+    console.log('🔍 NEW API - Final verification from DB:');
+    console.log('🔍 - savedPatient.prescriptions length:', savedPatient.prescriptions.length);
+    console.log('🔍 - savedPrescription found:', !!savedPrescription);
+    if (savedPrescription) {
+      console.log('🔍 - savedPrescription medications count:', savedPrescription.medications?.length || 0);
+      console.log('🔍 - savedPrescription medications:', savedPrescription.medications);
+    }
     
     // فحص تفصيلي للأدوية المحفوظة
     if (savedPrescription?.medications) {
@@ -8047,6 +8076,14 @@ app.post('/patients/:patientId/prescriptions', async (req, res) => {
     console.log('🔍 - medications array type:', typeof savedPrescription.medications);
     console.log('🔍 - medications is array:', Array.isArray(savedPrescription.medications));
     console.log('🔍 - medications length:', savedPrescription.medications.length);
+    
+    // فحص إضافي للتأكد من أن البيانات المحفوظة صحيحة
+    console.log('🔍 NEW API - Complete verification:');
+    console.log('🔍 - All prescriptions in patient:', savedPatient.prescriptions.map(p => ({
+      prescriptionId: p.prescriptionId,
+      medicationsCount: p.medications?.length || 0,
+      medications: p.medications
+    })));
     }
 
     res.json({
@@ -8075,6 +8112,18 @@ app.get('/patients/:patientId/prescriptions', async (req, res) => {
     const patient = await Patient.findById(patientId).populate('prescriptions.createdBy', 'name');
     if (!patient) {
       return res.status(404).json({ error: 'المريض غير موجود' });
+    }
+    
+    console.log('🔍 GET API - Patient found with prescriptions:');
+    console.log('🔍 - patient.prescriptions length:', patient.prescriptions.length);
+    if (patient.prescriptions.length > 0) {
+      patient.prescriptions.forEach((prescription, index) => {
+        console.log(`🔍 - Prescription ${index + 1}:`, {
+          prescriptionId: prescription.prescriptionId,
+          medicationsCount: prescription.medications?.length || 0,
+          medications: prescription.medications
+        });
+      });
     }
 
     console.log('🔍 Fetched prescriptions for patient:', {
@@ -8123,6 +8172,14 @@ app.get('/patients/:patientId/prescriptions', async (req, res) => {
         }
       });
     }
+
+    console.log('🔍 GET API - Final response data:');
+    console.log('🔍 - prescriptions count:', patient.prescriptions?.length || 0);
+    console.log('🔍 - prescriptions:', patient.prescriptions?.map(p => ({
+      prescriptionId: p.prescriptionId,
+      medicationsCount: p.medications?.length || 0,
+      medications: p.medications
+    })));
 
     res.json({
       success: true,
