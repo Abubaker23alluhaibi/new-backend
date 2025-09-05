@@ -7913,6 +7913,10 @@ app.post('/patients/:patientId/prescriptions', async (req, res) => {
       medications,
       doctorId
     });
+    
+    console.log('🔍 NEW API - medications type:', typeof medications);
+    console.log('🔍 NEW API - medications is array:', Array.isArray(medications));
+    console.log('🔍 NEW API - medications details:', JSON.stringify(medications, null, 2));
 
     // التحقق من صحة معرف المريض
     if (!mongoose.Types.ObjectId.isValid(patientId)) {
