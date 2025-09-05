@@ -7917,6 +7917,43 @@ app.post('/patients/:patientId/prescriptions', async (req, res) => {
     console.log('🔍 NEW API - medications type:', typeof medications);
     console.log('🔍 NEW API - medications is array:', Array.isArray(medications));
     console.log('🔍 NEW API - medications details:', JSON.stringify(medications, null, 2));
+    
+    // فحص إضافي للتأكد من أن البيانات المستلمة صحيحة
+    console.log('🔍 NEW API - Data validation on receive:');
+    console.log('🔍 - medications array type:', typeof medications);
+    console.log('🔍 - medications is array:', Array.isArray(medications));
+    console.log('🔍 - medications length:', medications?.length);
+    console.log('🔍 - medications content:', JSON.stringify(medications, null, 2));
+    
+    // فحص إضافي للتأكد من أن البيانات المستلمة صحيحة
+    console.log('🔍 NEW API - Request body validation:');
+    console.log('🔍 - request body:', JSON.stringify(req.body, null, 2));
+    console.log('🔍 - medications from body:', req.body.medications);
+    console.log('🔍 - medications type from body:', typeof req.body.medications);
+    console.log('🔍 - medications is array from body:', Array.isArray(req.body.medications));
+    
+    // فحص تفصيلي للأدوية
+    if (medications && Array.isArray(medications)) {
+      console.log('🔍 NEW API - Processing medications array with length:', medications.length);
+      medications.forEach((med, index) => {
+        console.log(`🔍 NEW API - Medication ${index + 1}:`, {
+          name: med.name,
+          dosage: med.dosage,
+          frequency: med.frequency,
+          duration: med.duration,
+          instructions: med.instructions
+        });
+      });
+      
+      // فحص إضافي للتأكد من أن جميع الأدوية صحيحة
+      const validMedications = medications.filter(med => 
+        med.name && med.dosage && med.frequency && med.duration
+      );
+      console.log('🔍 NEW API - Valid medications count:', validMedications.length);
+      console.log('🔍 NEW API - Valid medications:', validMedications);
+    } else {
+      console.log('🔍 NEW API - medications is not an array or is null/undefined');
+    }
 
     // التحقق من صحة معرف المريض
     if (!mongoose.Types.ObjectId.isValid(patientId)) {
@@ -7942,6 +7979,26 @@ app.post('/patients/:patientId/prescriptions', async (req, res) => {
       isActive: true,
       createdBy: doctorId
     };
+    
+    console.log('🔍 NEW API - Creating new prescription with medications:', {
+      prescriptionId: newPrescription.prescriptionId,
+      medicationsCount: newPrescription.medications.length,
+      medications: newPrescription.medications
+    });
+    
+    // فحص إضافي للتأكد من أن البيانات المحفوظة صحيحة
+    console.log('🔍 NEW API - Prescription data validation before save:');
+    console.log('🔍 - prescriptionId:', newPrescription.prescriptionId);
+    console.log('🔍 - medications count:', newPrescription.medications.length);
+    console.log('🔍 - medications array:', newPrescription.medications);
+    console.log('🔍 - medications JSON:', JSON.stringify(newPrescription.medications, null, 2));
+    
+    // فحص إضافي للتأكد من أن البيانات المحفوظة صحيحة
+    console.log('🔍 NEW API - Final prescription data validation:');
+    console.log('🔍 - prescription object:', JSON.stringify(newPrescription, null, 2));
+    console.log('🔍 - medications array type:', typeof newPrescription.medications);
+    console.log('🔍 - medications is array:', Array.isArray(newPrescription.medications));
+    console.log('🔍 - medications length:', newPrescription.medications.length);
 
     // إضافة الوصفة للمريض
     patient.prescriptions.push(newPrescription);
@@ -7953,6 +8010,44 @@ app.post('/patients/:patientId/prescriptions', async (req, res) => {
       medicationsCount: newPrescription.medications.length,
       medications: newPrescription.medications
     });
+    
+    // فحص الوصفة المحفوظة من قاعدة البيانات
+    const savedPatient = await Patient.findById(patientId);
+    const savedPrescription = savedPatient.prescriptions.find(p => p.prescriptionId === newPrescription.prescriptionId);
+    console.log('🔍 Saved prescription from DB:', {
+      prescriptionId: savedPrescription?.prescriptionId,
+      medicationsCount: savedPrescription?.medications?.length,
+      medications: savedPrescription?.medications
+    });
+    
+    // فحص تفصيلي للأدوية المحفوظة
+    if (savedPrescription?.medications) {
+      console.log('🔍 Saved prescription medications details:');
+      savedPrescription.medications.forEach((med, index) => {
+        console.log(`🔍 Saved Medication ${index + 1}:`, {
+          name: med.name,
+          dosage: med.dosage,
+          frequency: med.frequency,
+          duration: med.duration,
+          instructions: med.instructions
+        });
+      });
+      
+          // فحص إضافي للتأكد من أن البيانات المحفوظة صحيحة
+    console.log('🔍 Saved prescription medications validation:');
+    console.log('🔍 - total medications:', savedPrescription.medications.length);
+    console.log('🔍 - valid medications:', savedPrescription.medications.filter(med => 
+      med.name && med.dosage && med.frequency && med.duration
+    ).length);
+    console.log('🔍 - medications JSON:', JSON.stringify(savedPrescription.medications, null, 2));
+    
+    // فحص إضافي للتأكد من أن البيانات المحفوظة صحيحة
+    console.log('🔍 Saved prescription final validation:');
+    console.log('🔍 - prescription object:', JSON.stringify(savedPrescription, null, 2));
+    console.log('🔍 - medications array type:', typeof savedPrescription.medications);
+    console.log('🔍 - medications is array:', Array.isArray(savedPrescription.medications));
+    console.log('🔍 - medications length:', savedPrescription.medications.length);
+    }
 
     res.json({
       success: true,
@@ -7991,6 +8086,43 @@ app.get('/patients/:patientId/prescriptions', async (req, res) => {
         medications: p.medications
       }))
     });
+    
+    // فحص تفصيلي لكل وصفة
+    if (patient.prescriptions && patient.prescriptions.length > 0) {
+      patient.prescriptions.forEach((prescription, index) => {
+        console.log(`🔍 Prescription ${index + 1} details:`, {
+          prescriptionId: prescription.prescriptionId,
+          medicationsCount: prescription.medications?.length || 0,
+          medications: prescription.medications?.map((med, medIndex) => ({
+            index: medIndex + 1,
+            name: med.name,
+            dosage: med.dosage,
+            frequency: med.frequency,
+            duration: med.duration
+          }))
+        });
+        
+        // فحص إضافي للأدوية في كل وصفة
+        if (prescription.medications && prescription.medications.length > 0) {
+          console.log(`🔍 Prescription ${index + 1} medications validation:`, {
+            totalMedications: prescription.medications.length,
+            validMedications: prescription.medications.filter(med => 
+              med.name && med.dosage && med.frequency && med.duration
+            ).length
+          });
+          
+          // فحص إضافي للتأكد من أن البيانات المسترجعة صحيحة
+          console.log(`🔍 Prescription ${index + 1} medications JSON:`, JSON.stringify(prescription.medications, null, 2));
+          
+          // فحص إضافي للتأكد من أن البيانات المسترجعة صحيحة
+          console.log(`🔍 Prescription ${index + 1} final validation:`);
+          console.log(`🔍 - prescription object:`, JSON.stringify(prescription, null, 2));
+          console.log(`🔍 - medications array type:`, typeof prescription.medications);
+          console.log(`🔍 - medications is array:`, Array.isArray(prescription.medications));
+          console.log(`🔍 - medications length:`, prescription.medications.length);
+        }
+      });
+    }
 
     res.json({
       success: true,
@@ -8082,8 +8214,8 @@ app.delete('/patients/:patientId/prescriptions/:prescriptionId', async (req, res
   }
 });
 
-// إضافة وصفة طبية جديدة (الطريقة القديمة - للتوافق)
-app.post('/medications', async (req, res) => {
+// إضافة وصفة طبية جديدة (الطريقة القديمة - للتوافق) - DISABLED
+app.post('/medications-OLD-DISABLED', async (req, res) => {
   try {
     console.log('🔍 POST /medications - Request body:', req.body);
     console.log('🔍 POST /medications - Request body medications:', req.body.medications);
