@@ -4992,13 +4992,21 @@ const patientSchema = new mongoose.Schema({
     date: Date
   }],
   allergies: [String],
-  medications: [{
-    name: String,
-    dosage: String,
-    frequency: String,
-    startDate: Date,
-    endDate: Date,
-    isActive: { type: Boolean, default: true }
+  prescriptions: [{
+    prescriptionId: { type: String, required: true }, // معرف فريد للوصفة
+    date: { type: Date, default: Date.now },
+    diagnosis: String, // التشخيص
+    notes: String, // ملاحظات الطبيب
+    medications: [{
+      name: { type: String, required: true },
+      dosage: { type: String, required: true },
+      frequency: { type: String, required: true },
+      duration: { type: String, required: true },
+      instructions: String, // تعليمات خاصة
+      isActive: { type: Boolean, default: true }
+    }],
+    isActive: { type: Boolean, default: true },
+    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Doctor' }
   }],
   medicalReports: [{
     title: String,
@@ -5022,7 +5030,8 @@ const patientSchema = new mongoose.Schema({
 
 const Patient = mongoose.models.Patient || mongoose.model('Patient', patientSchema);
 
-// مخطط الأدوية والوصفات الطبية
+// مخطط الأدوية والوصفات الطبية (DEPRECATED - تم استبداله بنظام الوصفات المدمج مع المريض)
+// هذا الجدول محتفظ به للتوافق مع البيانات الموجودة فقط
 const medicationSchema = new mongoose.Schema({
   doctorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Doctor', required: true },
   doctorName: { type: String, required: true },
@@ -7889,7 +7898,160 @@ app.get('/medications/doctor/:doctorId', async (req, res) => {
   }
 });
 
-// إضافة وصفة طبية جديدة
+// إضافة وصفة طبية جديدة للمريض
+app.post('/patients/:patientId/prescriptions', async (req, res) => {
+  try {
+    const { patientId } = req.params;
+    const { diagnosis, notes, medications, doctorId } = req.body;
+
+    // التحقق من صحة معرف المريض
+    if (!mongoose.Types.ObjectId.isValid(patientId)) {
+      return res.status(400).json({ error: 'معرف المريض غير صحيح' });
+    }
+
+    // التحقق من وجود المريض
+    const patient = await Patient.findById(patientId);
+    if (!patient) {
+      return res.status(404).json({ error: 'المريض غير موجود' });
+    }
+
+    // إنشاء معرف فريد للوصفة
+    const prescriptionId = `RX-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+    // إنشاء الوصفة الجديدة
+    const newPrescription = {
+      prescriptionId,
+      date: new Date(),
+      diagnosis,
+      notes,
+      medications: medications || [],
+      isActive: true,
+      createdBy: doctorId
+    };
+
+    // إضافة الوصفة للمريض
+    patient.prescriptions.push(newPrescription);
+    await patient.save();
+
+    res.json({
+      success: true,
+      message: 'تم إضافة الوصفة الطبية بنجاح',
+      prescription: newPrescription
+    });
+
+  } catch (error) {
+    console.error('Error adding prescription:', error);
+    res.status(500).json({ error: 'خطأ في إضافة الوصفة الطبية' });
+  }
+});
+
+// جلب وصفات المريض
+app.get('/patients/:patientId/prescriptions', async (req, res) => {
+  try {
+    const { patientId } = req.params;
+
+    // التحقق من صحة معرف المريض
+    if (!mongoose.Types.ObjectId.isValid(patientId)) {
+      return res.status(400).json({ error: 'معرف المريض غير صحيح' });
+    }
+
+    // جلب المريض مع الوصفات
+    const patient = await Patient.findById(patientId).populate('prescriptions.createdBy', 'name');
+    if (!patient) {
+      return res.status(404).json({ error: 'المريض غير موجود' });
+    }
+
+    res.json({
+      success: true,
+      prescriptions: patient.prescriptions || []
+    });
+
+  } catch (error) {
+    console.error('Error fetching prescriptions:', error);
+    res.status(500).json({ error: 'خطأ في جلب الوصفات' });
+  }
+});
+
+// تحديث وصفة طبية
+app.put('/patients/:patientId/prescriptions/:prescriptionId', async (req, res) => {
+  try {
+    const { patientId, prescriptionId } = req.params;
+    const { diagnosis, notes, medications, isActive } = req.body;
+
+    // التحقق من صحة معرف المريض
+    if (!mongoose.Types.ObjectId.isValid(patientId)) {
+      return res.status(400).json({ error: 'معرف المريض غير صحيح' });
+    }
+
+    // جلب المريض
+    const patient = await Patient.findById(patientId);
+    if (!patient) {
+      return res.status(404).json({ error: 'المريض غير موجود' });
+    }
+
+    // البحث عن الوصفة
+    const prescription = patient.prescriptions.id(prescriptionId);
+    if (!prescription) {
+      return res.status(404).json({ error: 'الوصفة غير موجودة' });
+    }
+
+    // تحديث الوصفة
+    if (diagnosis !== undefined) prescription.diagnosis = diagnosis;
+    if (notes !== undefined) prescription.notes = notes;
+    if (medications !== undefined) prescription.medications = medications;
+    if (isActive !== undefined) prescription.isActive = isActive;
+
+    await patient.save();
+
+    res.json({
+      success: true,
+      message: 'تم تحديث الوصفة الطبية بنجاح',
+      prescription
+    });
+
+  } catch (error) {
+    console.error('Error updating prescription:', error);
+    res.status(500).json({ error: 'خطأ في تحديث الوصفة الطبية' });
+  }
+});
+
+// حذف وصفة طبية
+app.delete('/patients/:patientId/prescriptions/:prescriptionId', async (req, res) => {
+  try {
+    const { patientId, prescriptionId } = req.params;
+
+    // التحقق من صحة معرف المريض
+    if (!mongoose.Types.ObjectId.isValid(patientId)) {
+      return res.status(400).json({ error: 'معرف المريض غير صحيح' });
+    }
+
+    // جلب المريض
+    const patient = await Patient.findById(patientId);
+    if (!patient) {
+      return res.status(404).json({ error: 'المريض غير موجود' });
+    }
+
+    // البحث عن الوصفة وحذفها
+    const prescription = patient.prescriptions.id(prescriptionId);
+    if (!prescription) {
+      return res.status(404).json({ error: 'الوصفة غير موجودة' });
+    }
+
+    prescription.remove();
+    await patient.save();
+
+    res.json({
+      success: true,
+      message: 'تم حذف الوصفة الطبية بنجاح'
+    });
+
+  } catch (error) {
+    console.error('Error deleting prescription:', error);
+    res.status(500).json({ error: 'خطأ في حذف الوصفة الطبية' });
+  }
+});
+
+// إضافة وصفة طبية جديدة (الطريقة القديمة - للتوافق)
 app.post('/medications', async (req, res) => {
   try {
     console.log('🔍 POST /medications - Request body:', req.body);
