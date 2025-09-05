@@ -28,7 +28,6 @@ const crypto = require('crypto');
 const axios = require('axios');
 const http = require('http');
 const socketIo = require('socket.io');
-const csrf = require('csurf');
 const cookieParser = require('cookie-parser');
 
 const app = express();
@@ -128,16 +127,38 @@ app.use(helmet({
   referrerPolicy: { policy: "strict-origin-when-cross-origin" }
 })); // حماية HTTP headers
 
-// إعداد cookie parser قبل CSRF
+// إعداد cookie parser
 app.use(cookieParser());
 
-// إعداد CSRF protection
-const csrfProtection = csrf({
-  cookie: {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'strict'
+// إعداد CSRF protection محسن
+const csrfProtection = (req, res, next) => {
+  // التحقق من وجود CSRF token في header
+  const csrfToken = req.headers['x-csrf-token'];
+  const sessionToken = req.cookies['csrf-token'];
+  
+  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') {
+    return next();
   }
+  
+  if (!csrfToken || !sessionToken || csrfToken !== sessionToken) {
+    return res.status(403).json({ error: 'Invalid CSRF token' });
+  }
+  
+  next();
+};
+
+// إضافة CSRF token للطلبات
+app.use((req, res, next) => {
+  if (!req.cookies['csrf-token']) {
+    const token = crypto.randomBytes(32).toString('hex');
+    res.cookie('csrf-token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 24 * 60 * 60 * 1000 // 24 ساعة
+    });
+  }
+  next();
 });
 
 app.use(mongoSanitize()); // منع NoSQL injection
