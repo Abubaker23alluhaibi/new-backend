@@ -7933,6 +7933,13 @@ app.post('/patients/:patientId/prescriptions', async (req, res) => {
     patient.prescriptions.push(newPrescription);
     await patient.save();
 
+    console.log('🔍 Added prescription to patient:', {
+      patientId: patient._id,
+      prescriptionId: newPrescription.prescriptionId,
+      medicationsCount: newPrescription.medications.length,
+      medications: newPrescription.medications
+    });
+
     res.json({
       success: true,
       message: 'تم إضافة الوصفة الطبية بنجاح',
@@ -7960,6 +7967,16 @@ app.get('/patients/:patientId/prescriptions', async (req, res) => {
     if (!patient) {
       return res.status(404).json({ error: 'المريض غير موجود' });
     }
+
+    console.log('🔍 Fetched prescriptions for patient:', {
+      patientId: patient._id,
+      prescriptionsCount: patient.prescriptions?.length || 0,
+      prescriptions: patient.prescriptions?.map(p => ({
+        prescriptionId: p.prescriptionId,
+        medicationsCount: p.medications?.length || 0,
+        medications: p.medications
+      }))
+    });
 
     res.json({
       success: true,
