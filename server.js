@@ -7901,8 +7901,18 @@ app.get('/medications/doctor/:doctorId', async (req, res) => {
 // إضافة وصفة طبية جديدة للمريض
 app.post('/patients/:patientId/prescriptions', async (req, res) => {
   try {
+    console.log('🔍 NEW API - POST /patients/:patientId/prescriptions called');
     const { patientId } = req.params;
     const { diagnosis, notes, medications, doctorId } = req.body;
+    
+    console.log('🔍 NEW API - Request data:', {
+      patientId,
+      diagnosis,
+      notes,
+      medicationsCount: medications?.length,
+      medications,
+      doctorId
+    });
 
     // التحقق من صحة معرف المريض
     if (!mongoose.Types.ObjectId.isValid(patientId)) {
