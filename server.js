@@ -7899,11 +7899,21 @@ app.get('/medications/doctor/:doctorId', async (req, res) => {
 });
 
 // إضافة وصفة طبية جديدة للمريض
-app.post('/patients/:patientId/prescriptions', async (req, res) => {
+app.post('/patients/:patientId/prescriptions', authenticateToken, async (req, res) => {
   try {
     console.log('🔍 NEW API - POST /patients/:patientId/prescriptions called');
     const { patientId } = req.params;
     const { diagnosis, notes, medications, doctorId } = req.body;
+    
+    // التحقق من الصلاحيات
+    if (req.user.role !== 'doctor') {
+      return res.status(403).json({ error: 'غير مصرح لك بإضافة وصفات طبية' });
+    }
+    
+    // التحقق من أن doctorId يطابق المستخدم المسجل دخوله
+    if (req.user._id !== doctorId) {
+      return res.status(403).json({ error: 'غير مصرح لك بإضافة وصفات لهذا الطبيب' });
+    }
     
     console.log('🔍 NEW API - Request data:', {
       patientId,
@@ -7914,81 +7924,102 @@ app.post('/patients/:patientId/prescriptions', async (req, res) => {
       doctorId
     });
     
-    console.log('🔍 NEW API - medications type:', typeof medications);
-    console.log('🔍 NEW API - medications is array:', Array.isArray(medications));
-    console.log('🔍 NEW API - medications details:', JSON.stringify(medications, null, 2));
-    
-    // فحص إضافي للتأكد من أن البيانات المستلمة صحيحة
-    console.log('🔍 NEW API - Data validation on receive:');
-    console.log('🔍 - medications array type:', typeof medications);
-    console.log('🔍 - medications is array:', Array.isArray(medications));
-    console.log('🔍 - medications length:', medications?.length);
-    console.log('🔍 - medications content:', JSON.stringify(medications, null, 2));
-    
-    // فحص إضافي للتأكد من أن البيانات المستلمة صحيحة
-    console.log('🔍 NEW API - Request body validation:');
-    console.log('🔍 - request body:', JSON.stringify(req.body, null, 2));
-    console.log('🔍 - medications from body:', req.body.medications);
-    console.log('🔍 - medications type from body:', typeof req.body.medications);
-    console.log('🔍 - medications is array from body:', Array.isArray(req.body.medications));
-    
-    // فحص تفصيلي للأدوية
-    let validMedications = [];
-    if (medications && Array.isArray(medications)) {
-      console.log('🔍 NEW API - Processing medications array with length:', medications.length);
-      medications.forEach((med, index) => {
-        console.log(`🔍 NEW API - Medication ${index + 1}:`, {
-          name: med.name,
-          dosage: med.dosage,
-          frequency: med.frequency,
-          duration: med.duration,
-          instructions: med.instructions
-        });
+    // التحقق من البيانات المطلوبة الأساسية
+    if (!patientId || !doctorId) {
+      return res.status(400).json({ 
+        error: 'معرف المريض ومعرف الطبيب مطلوبان' 
       });
-      
-      // التحقق من صحة الأدوية مع إضافة رسائل خطأ مفصلة
-      validMedications = medications.filter((med, index) => {
-        const isValid = med.name && med.dosage && med.frequency && med.duration;
-        if (!isValid) {
-          console.log(`🔍 NEW API - Medication ${index + 1} is invalid:`, {
-            name: med.name || 'MISSING',
-            dosage: med.dosage || 'MISSING',
-            frequency: med.frequency || 'MISSING',
-            duration: med.duration || 'MISSING'
-          });
-        }
-        return isValid;
-      });
-      
-      console.log('🔍 NEW API - Valid medications count:', validMedications.length);
-      console.log('🔍 NEW API - Valid medications:', validMedications);
-      
-      // إذا لم توجد أدوية صحيحة، استخدم الأدوية الأصلية مع تحذير
-      if (validMedications.length === 0 && medications.length > 0) {
-        console.log('🔍 NEW API - No valid medications found, using original medications with warning');
-        validMedications = medications;
-      }
-      
-      // تحقق إضافي: إذا كان عدد الأدوية الصحيحة أقل من الأصلية، أضف تحذير
-      if (validMedications.length < medications.length) {
-        console.log(`🔍 NEW API - WARNING: Only ${validMedications.length} out of ${medications.length} medications are valid`);
-        console.log('🔍 NEW API - Invalid medications details:');
-        medications.forEach((med, index) => {
-          const isValid = med.name && med.dosage && med.frequency && med.duration;
-          if (!isValid) {
-            console.log(`🔍 NEW API - Invalid medication ${index + 1}:`, {
-              name: med.name || 'MISSING',
-              dosage: med.dosage || 'MISSING', 
-              frequency: med.frequency || 'MISSING',
-              duration: med.duration || 'MISSING'
-            });
-          }
-        });
-      }
-    } else {
-      console.log('🔍 NEW API - medications is not an array or is null/undefined');
-      validMedications = [];
     }
+    
+    if (!medications || !Array.isArray(medications) || medications.length === 0) {
+      return res.status(400).json({ 
+        error: 'يجب إضافة دواء واحد على الأقل' 
+      });
+    }
+    
+    // قوائم الاختيارات الصحيحة
+    const validDosages = [
+      '250 مجم', '500 مجم', '750 مجم', '1000 مجم',
+      '5 مل', '10 مل', '15 مل', '20 مل',
+      '1 حبة', '2 حبة', '3 حبة'
+    ];
+    
+    const validFrequencies = [
+      'مرة واحدة يومياً', 'مرتين يومياً', '3 مرات يومياً', '4 مرات يومياً',
+      'كل 6 ساعات', 'كل 8 ساعات', 'كل 12 ساعة',
+      'عند الحاجة'
+    ];
+    
+    const validDurations = [
+      '3 أيام', '5 أيام', '7 أيام', '10 أيام',
+      '14 يوم', '21 يوم', 'شهر واحد', 'شهرين',
+      '3 أشهر', '6 أشهر', 'سنة واحدة', 'مستمر'
+    ];
+    
+    // التحقق من صحة بيانات الأدوية مع رسائل خطأ مفصلة
+    const invalidMedications = [];
+    const validMedications = [];
+    
+    medications.forEach((med, index) => {
+      const errors = [];
+      
+      // التحقق من الحقول المطلوبة
+      if (!med.name || med.name.trim() === '') {
+        errors.push('اسم الدواء مطلوب');
+      }
+      if (!med.dosage || med.dosage.trim() === '') {
+        errors.push('الجرعة مطلوبة');
+      }
+      if (!med.frequency || med.frequency.trim() === '') {
+        errors.push('التكرار مطلوب');
+      }
+      if (!med.duration || med.duration.trim() === '') {
+        errors.push('المدة مطلوبة');
+      }
+      
+      // التحقق من صحة القيم
+      if (med.dosage && !validDosages.includes(med.dosage)) {
+        errors.push(`الجرعة "${med.dosage}" غير صحيحة`);
+      }
+      if (med.frequency && !validFrequencies.includes(med.frequency)) {
+        errors.push(`التكرار "${med.frequency}" غير صحيح`);
+      }
+      if (med.duration && !validDurations.includes(med.duration)) {
+        errors.push(`المدة "${med.duration}" غير صحيحة`);
+      }
+      
+      if (errors.length > 0) {
+        invalidMedications.push({
+          index: index + 1,
+          medication: med,
+          errors: errors
+        });
+        console.log(`🔍 NEW API - Medication ${index + 1} is invalid:`, {
+          name: med.name || 'MISSING',
+          dosage: med.dosage || 'MISSING',
+          frequency: med.frequency || 'MISSING',
+          duration: med.duration || 'MISSING',
+          errors: errors
+        });
+      } else {
+        validMedications.push(med);
+      }
+    });
+    
+    // إذا كانت هناك أدوية غير صحيحة، أرسل رسالة خطأ مفصلة
+    if (invalidMedications.length > 0) {
+      const errorMessage = invalidMedications.map(med => 
+        `الدواء ${med.index}: ${med.errors.join(', ')}`
+      ).join('; ');
+      
+      return res.status(400).json({ 
+        error: `بيانات الأدوية غير صحيحة: ${errorMessage}`,
+        invalidMedications: invalidMedications
+      });
+    }
+    
+    console.log('🔍 NEW API - Valid medications count:', validMedications.length);
+    console.log('🔍 NEW API - Valid medications:', validMedications);
 
     // التحقق من صحة معرف المريض
     if (!mongoose.Types.ObjectId.isValid(patientId)) {
@@ -8122,17 +8153,40 @@ app.post('/patients/:patientId/prescriptions', async (req, res) => {
     res.json({
       success: true,
       message: 'تم إضافة الوصفة الطبية بنجاح',
-      prescription: newPrescription
+      prescription: newPrescription,
+      medicationsCount: newPrescription.medications.length
     });
 
   } catch (error) {
-    console.error('Error adding prescription:', error);
-    res.status(500).json({ error: 'خطأ في إضافة الوصفة الطبية' });
+    console.error('🔍 NEW API - Error adding prescription:', error);
+    
+    // تحديد نوع الخطأ وإرسال رسالة مناسبة
+    if (error.name === 'ValidationError') {
+      return res.status(400).json({ 
+        error: 'بيانات الوصفة غير صحيحة',
+        details: error.message 
+      });
+    } else if (error.name === 'CastError') {
+      return res.status(400).json({ 
+        error: 'معرف غير صحيح',
+        details: error.message 
+      });
+    } else if (error.code === 11000) {
+      return res.status(400).json({ 
+        error: 'الوصفة موجودة مسبقاً',
+        details: 'معرف الوصفة مكرر'
+      });
+    } else {
+      return res.status(500).json({ 
+        error: 'خطأ في الخادم',
+        details: process.env.NODE_ENV === 'development' ? error.message : 'حدث خطأ غير متوقع'
+      });
+    }
   }
 });
 
 // جلب وصفات المريض
-app.get('/patients/:patientId/prescriptions', async (req, res) => {
+app.get('/patients/:patientId/prescriptions', authenticateToken, async (req, res) => {
   try {
     const { patientId } = req.params;
 
@@ -8226,7 +8280,7 @@ app.get('/patients/:patientId/prescriptions', async (req, res) => {
 });
 
 // تحديث وصفة طبية
-app.put('/patients/:patientId/prescriptions/:prescriptionId', async (req, res) => {
+app.put('/patients/:patientId/prescriptions/:prescriptionId', authenticateToken, async (req, res) => {
   try {
     const { patientId, prescriptionId } = req.params;
     const { diagnosis, notes, medications, isActive } = req.body;
@@ -8269,7 +8323,7 @@ app.put('/patients/:patientId/prescriptions/:prescriptionId', async (req, res) =
 });
 
 // حذف وصفة طبية
-app.delete('/patients/:patientId/prescriptions/:prescriptionId', async (req, res) => {
+app.delete('/patients/:patientId/prescriptions/:prescriptionId', authenticateToken, async (req, res) => {
   try {
     const { patientId, prescriptionId } = req.params;
 
@@ -8304,134 +8358,13 @@ app.delete('/patients/:patientId/prescriptions/:prescriptionId', async (req, res
   }
 });
 
-// إضافة وصفة طبية جديدة (الطريقة القديمة - للتوافق) - DISABLED
+// إضافة وصفة طبية جديدة (الطريقة القديمة - معطلة) - DISABLED
 app.post('/medications-OLD-DISABLED', async (req, res) => {
-  try {
-    console.log('🔍 POST /medications - Request body:', req.body);
-    console.log('🔍 POST /medications - Request body medications:', req.body.medications);
-    console.log('🔍 POST /medications - Request body medications length:', req.body.medications?.length);
-    
-    const {
-      doctorId,
-      doctorName,
-      patientId,
-      patientName,
-      patientPhone,
-      diagnosis,
-      medications,
-      notes,
-      date
-    } = req.body;
-    
-    console.log('🔍 POST /medications - medications array:', medications);
-    console.log('🔍 POST /medications - medications length:', medications?.length);
-    console.log('🔍 POST /medications - medications details:', JSON.stringify(medications, null, 2));
-
-    // التحقق من البيانات المطلوبة
-    if (!doctorId || !patientId || !medications || medications.length === 0) {
-      return res.status(400).json({ 
-        error: 'يرجى إدخال جميع البيانات المطلوبة' 
-      });
-    }
-
-    // قوائم الاختيارات الصحيحة
-    const validDosages = [
-      '250 مجم', '500 مجم', '750 مجم', '1000 مجم',
-      '5 مل', '10 مل', '15 مل', '20 مل',
-      '1 حبة', '2 حبة', '3 حبة'
-    ];
-    
-    const validFrequencies = [
-      'مرة واحدة يومياً', 'مرتين يومياً', '3 مرات يومياً', '4 مرات يومياً',
-      'كل 6 ساعات', 'كل 8 ساعات', 'كل 12 ساعة',
-      'عند الحاجة'
-    ];
-    
-    const validDurations = [
-      '3 أيام', '5 أيام', '7 أيام', '10 أيام',
-      '14 يوم', '21 يوم', 'شهر واحد', 'شهرين',
-      '3 أشهر', '6 أشهر', 'سنة واحدة', 'مستمر'
-    ];
-
-    // التحقق من صحة بيانات الأدوية
-    for (let i = 0; i < medications.length; i++) {
-      const med = medications[i];
-      
-      if (!med.name || !med.dosage || !med.frequency || !med.duration) {
-        return res.status(400).json({ 
-          error: `يرجى إدخال جميع البيانات المطلوبة للدواء ${i + 1}` 
-        });
-      }
-      
-      if (!validDosages.includes(med.dosage)) {
-        return res.status(400).json({ 
-          error: `الجرعة المحددة للدواء ${i + 1} غير صحيحة` 
-        });
-      }
-      
-      if (!validFrequencies.includes(med.frequency)) {
-        return res.status(400).json({ 
-          error: `التكرار المحدد للدواء ${i + 1} غير صحيح` 
-        });
-      }
-      
-      if (!validDurations.includes(med.duration)) {
-        return res.status(400).json({ 
-          error: `المدة المحددة للدواء ${i + 1} غير صحيحة` 
-        });
-      }
-    }
-
-    // التحقق من صحة معرفات الدكتور والمريض
-    if (!mongoose.Types.ObjectId.isValid(doctorId)) {
-      return res.status(400).json({ error: 'معرف الطبيب غير صحيح' });
-    }
-    
-    if (!mongoose.Types.ObjectId.isValid(patientId)) {
-      return res.status(400).json({ error: 'معرف المريض غير صحيح' });
-    }
-
-    // التحقق من وجود الدكتور
-    const doctor = await Doctor.findById(doctorId);
-    if (!doctor) {
-      return res.status(404).json({ error: 'الطبيب غير موجود' });
-    }
-
-    // التحقق من وجود المريض
-    const patient = await Patient.findById(patientId);
-    if (!patient) {
-      return res.status(404).json({ error: 'المريض غير موجود' });
-    }
-
-    // إنشاء الوصفة الطبية
-    const medication = new Medication({
-      doctorId,
-      doctorName: doctorName || doctor.first_name || 'دكتور',
-      patientId,
-      patientName: patientName || patient.name,
-      patientPhone: patientPhone || patient.phone,
-      diagnosis,
-      medications,
-      notes,
-      date: date ? new Date(date) : new Date()
-    });
-
-    console.log('🔍 POST /medications - Created medication object:', medication);
-    console.log('🔍 POST /medications - Medications in object:', medication.medications);
-
-    await medication.save();
-    
-    console.log('🔍 POST /medications - Saved medication:', medication);
-
-    res.status(201).json({
-      success: true,
-      message: 'تم إضافة الوصفة الطبية بنجاح',
-      medication: medication
-    });
-  } catch (error) {
-    console.error('Error adding medication:', error);
-    res.status(500).json({ error: 'خطأ في إضافة الوصفة الطبية' });
-  }
+  return res.status(410).json({ 
+    error: 'هذا الـ endpoint معطل. يرجى استخدام /patients/:patientId/prescriptions',
+    deprecated: true,
+    newEndpoint: '/patients/:patientId/prescriptions'
+  });
 });
 
 // تحديث وصفة طبية
