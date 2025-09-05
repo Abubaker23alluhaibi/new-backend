@@ -28,7 +28,6 @@ const crypto = require('crypto');
 const axios = require('axios');
 const http = require('http');
 const socketIo = require('socket.io');
-const cookieParser = require('cookie-parser');
 
 const app = express();
 const server = http.createServer(app);
@@ -127,36 +126,18 @@ app.use(helmet({
   referrerPolicy: { policy: "strict-origin-when-cross-origin" }
 })); // حماية HTTP headers
 
-// إعداد cookie parser
-app.use(cookieParser());
 
-// إعداد CSRF protection محسن
-const csrfProtection = (req, res, next) => {
-  // التحقق من وجود CSRF token في header
-  const csrfToken = req.headers['x-csrf-token'];
-  const sessionToken = req.cookies['csrf-token'];
-  
-  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') {
-    return next();
-  }
-  
-  if (!csrfToken || !sessionToken || csrfToken !== sessionToken) {
-    return res.status(403).json({ error: 'Invalid CSRF token' });
-  }
-  
-  next();
-};
-
-// إضافة CSRF token للطلبات
+// حماية أساسية من CSRF
 app.use((req, res, next) => {
-  if (!req.cookies['csrf-token']) {
-    const token = crypto.randomBytes(32).toString('hex');
-    res.cookie('csrf-token', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 24 * 60 * 60 * 1000 // 24 ساعة
-    });
+  // التحقق من Referer header للطلبات POST/PUT/DELETE
+  if (['POST', 'PUT', 'DELETE'].includes(req.method)) {
+    const referer = req.headers.referer;
+    const origin = req.headers.origin;
+    
+    // السماح بالطلبات من نفس النطاق أو من Railway
+    if (referer && !referer.includes(process.env.CORS_ORIGIN || 'localhost')) {
+      return res.status(403).json({ error: 'Invalid request origin' });
+    }
   }
   next();
 });
@@ -562,35 +543,11 @@ const generateToken = (payload) => {
   return jwt.sign(payload, JWT_SECRET, JWT_OPTIONS);
 };
 
-// دالة إرسال التوكن في httpOnly cookie
-const setTokenCookie = (res, token) => {
-  res.cookie('token', token, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'strict',
-    maxAge: 24 * 60 * 60 * 1000 // 24 ساعة
-  });
-};
-
-// دالة حذف التوكن من cookies
-const clearTokenCookie = (res) => {
-  res.clearCookie('token', {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'strict'
-  });
-};
 
 // دالة التحقق من JWT token
 const authenticateToken = (req, res, next) => {
-  // محاولة الحصول على التوكن من Authorization header أولاً
   const authHeader = req.headers['authorization'];
-  let token = authHeader && authHeader.split(' ')[1];
-  
-  // إذا لم يوجد في header، جرب من cookies
-  if (!token) {
-    token = req.cookies.token;
-  }
+  const token = authHeader && authHeader.split(' ')[1];
   
   if (!token) {
     // تأخير ثابت لمنع Timing Attacks
@@ -1278,13 +1235,11 @@ app.post('/login', async (req, res) => {
           // إنشاء JWT token
           const token = generateToken(adminUser);
           
-          // إرسال التوكن في httpOnly cookie
-          setTokenCookie(res, token);
-          
           return res.json({ 
             message: 'تم تسجيل الدخول بنجاح', 
             userType: 'admin', 
-            user: adminUser
+            user: adminUser,
+            token: token
           });
         }
       }
@@ -1308,13 +1263,11 @@ app.post('/login', async (req, res) => {
         // إنشاء JWT token
         const token = generateToken(doctorObj);
         
-        // إرسال التوكن في httpOnly cookie
-        setTokenCookie(res, token);
-        
         return res.json({ 
           message: 'تم تسجيل الدخول بنجاح', 
           userType: 'doctor', 
-          doctor: doctorObj
+          doctor: doctorObj,
+          token: token
         });
       }
       // إذا لم يوجد في جدول الأطباء، ابحث في جدول المستخدمين
@@ -1347,13 +1300,11 @@ app.post('/login', async (req, res) => {
         // إنشاء JWT token
         const token = generateToken(userObj);
         
-        // إرسال التوكن في httpOnly cookie
-        setTokenCookie(res, token);
-        
         return res.json({ 
           message: 'تم تسجيل الدخول بنجاح', 
           userType: 'user', 
-          user: userObj
+          user: userObj,
+          token: token
         });
       }
       // إذا لم يوجد في جدول المستخدمين، ابحث في جدول الأطباء
@@ -7475,26 +7426,10 @@ app.get('/api/doctors/:doctorId/patients/stats', async (req, res) => {
   }
 });
 
-// ===== نقاط النهاية للمصادقة الآمنة =====
+// ===== نقاط النهاية للمصادقة =====
 
-// الحصول على التوكن من cookies
-app.get('/api/auth/token', (req, res) => {
-  const token = req.cookies.token;
-  if (token) {
-    res.json({ token });
-  } else {
-    res.status(401).json({ error: 'No token found' });
-  }
-});
-
-// التحقق من صحة التوكن
-app.get('/api/auth/validate', authenticateToken, (req, res) => {
-  res.json({ valid: true, user: req.user });
-});
-
-// تسجيل الخروج الآمن
+// تسجيل الخروج
 app.post('/logout', (req, res) => {
-  clearTokenCookie(res);
   res.json({ message: 'تم تسجيل الخروج بنجاح' });
 });
 
