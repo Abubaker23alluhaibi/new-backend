@@ -5043,6 +5043,23 @@ const patientSchema = new mongoose.Schema({
 
 const Patient = mongoose.models.Patient || mongoose.model('Patient', patientSchema);
 
+// ===== مخطط الأدوية =====
+const medicationSchema = new mongoose.Schema({
+  patientId: { type: mongoose.Schema.Types.ObjectId, ref: 'Patient', required: true },
+  doctorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Doctor', required: true },
+  prescriptionId: { type: String, required: true }, // معرف الوصفة الطبية
+  name: { type: String, required: true }, // اسم الدواء
+  dosage: { type: String, required: true }, // الجرعة
+  frequency: { type: String, required: true }, // التكرار
+  duration: String, // المدة
+  instructions: String, // التعليمات
+  notes: String, // ملاحظات إضافية
+  isActive: { type: Boolean, default: true }, // هل الدواء نشط
+  createdAt: { type: Date, default: Date.now },
+  updatedAt: { type: Date, default: Date.now }
+});
+
+const Medication = mongoose.models.Medication || mongoose.model('Medication', medicationSchema);
 
 // ===== نقاط نهائية إدارة الموظفين =====
 
@@ -7762,6 +7779,163 @@ app.get('/doctors/me/patients/stats', authenticateToken, requireUserType(['docto
   } catch (error) {
     console.error('خطأ في جلب إحصائيات المرضى:', error);
     res.status(500).json({ error: 'خطأ في جلب إحصائيات المرضى' });
+  }
+});
+
+// ===== نقاط النهاية للأدوية =====
+
+// جلب أدوية المريض
+app.get('/doctors/me/patients/:patientId/medications', authenticateToken, requireUserType(['doctor']), async (req, res) => {
+  try {
+    const { patientId } = req.params;
+    const doctorId = req.user._id;
+
+    // التحقق من صحة معرف المريض
+    if (!mongoose.Types.ObjectId.isValid(patientId)) {
+      return res.status(400).json({ error: 'معرف المريض غير صحيح' });
+    }
+
+    // التحقق من أن المريض يخص هذا الطبيب
+    const patient = await Patient.findOne({ _id: patientId, doctorId });
+    if (!patient) {
+      return res.status(404).json({ error: 'المريض غير موجود أو لا يخص هذا الطبيب' });
+    }
+
+    // جلب الأدوية
+    const medications = await Medication.find({ patientId, doctorId }).sort({ createdAt: -1 });
+
+    res.json({ medications });
+  } catch (error) {
+    console.error('خطأ في جلب الأدوية:', error);
+    res.status(500).json({ error: 'خطأ في جلب الأدوية' });
+  }
+});
+
+// إضافة دواء جديد للمريض
+app.post('/doctors/me/patients/:patientId/medications', authenticateToken, requireUserType(['doctor']), async (req, res) => {
+  try {
+    const { patientId } = req.params;
+    const doctorId = req.user._id;
+    const { prescriptionId, name, dosage, frequency, duration, instructions, notes } = req.body;
+
+    // التحقق من صحة معرف المريض
+    if (!mongoose.Types.ObjectId.isValid(patientId)) {
+      return res.status(400).json({ error: 'معرف المريض غير صحيح' });
+    }
+
+    // التحقق من الحقول المطلوبة
+    if (!prescriptionId || !name || !dosage || !frequency) {
+      return res.status(400).json({ 
+        error: 'معرف الوصفة واسم الدواء والجرعة والتكرار مطلوبة' 
+      });
+    }
+
+    // التحقق من أن المريض يخص هذا الطبيب
+    const patient = await Patient.findOne({ _id: patientId, doctorId });
+    if (!patient) {
+      return res.status(404).json({ error: 'المريض غير موجود أو لا يخص هذا الطبيب' });
+    }
+
+    // إنشاء الدواء الجديد
+    const medication = new Medication({
+      patientId,
+      doctorId,
+      prescriptionId,
+      name,
+      dosage,
+      frequency,
+      duration,
+      instructions,
+      notes
+    });
+
+    await medication.save();
+
+    res.status(201).json({
+      message: 'تم إضافة الدواء بنجاح',
+      medication
+    });
+  } catch (error) {
+    console.error('خطأ في إضافة الدواء:', error);
+    res.status(500).json({ error: 'خطأ في إضافة الدواء' });
+  }
+});
+
+// تحديث دواء
+app.put('/doctors/me/patients/:patientId/medications/:medicationId', authenticateToken, requireUserType(['doctor']), async (req, res) => {
+  try {
+    const { patientId, medicationId } = req.params;
+    const doctorId = req.user._id;
+    const { name, dosage, frequency, duration, instructions, notes } = req.body;
+
+    // التحقق من صحة المعرفات
+    if (!mongoose.Types.ObjectId.isValid(patientId) || !mongoose.Types.ObjectId.isValid(medicationId)) {
+      return res.status(400).json({ error: 'معرف المريض أو الدواء غير صحيح' });
+    }
+
+    // التحقق من أن المريض يخص هذا الطبيب
+    const patient = await Patient.findOne({ _id: patientId, doctorId });
+    if (!patient) {
+      return res.status(404).json({ error: 'المريض غير موجود أو لا يخص هذا الطبيب' });
+    }
+
+    // تحديث الدواء
+    const medication = await Medication.findOneAndUpdate(
+      { _id: medicationId, patientId, doctorId },
+      { 
+        name, 
+        dosage, 
+        frequency, 
+        duration, 
+        instructions, 
+        notes,
+        updatedAt: new Date()
+      },
+      { new: true }
+    );
+
+    if (!medication) {
+      return res.status(404).json({ error: 'الدواء غير موجود' });
+    }
+
+    res.json({
+      message: 'تم تحديث الدواء بنجاح',
+      medication
+    });
+  } catch (error) {
+    console.error('خطأ في تحديث الدواء:', error);
+    res.status(500).json({ error: 'خطأ في تحديث الدواء' });
+  }
+});
+
+// حذف دواء
+app.delete('/doctors/me/patients/:patientId/medications/:medicationId', authenticateToken, requireUserType(['doctor']), async (req, res) => {
+  try {
+    const { patientId, medicationId } = req.params;
+    const doctorId = req.user._id;
+
+    // التحقق من صحة المعرفات
+    if (!mongoose.Types.ObjectId.isValid(patientId) || !mongoose.Types.ObjectId.isValid(medicationId)) {
+      return res.status(400).json({ error: 'معرف المريض أو الدواء غير صحيح' });
+    }
+
+    // التحقق من أن المريض يخص هذا الطبيب
+    const patient = await Patient.findOne({ _id: patientId, doctorId });
+    if (!patient) {
+      return res.status(404).json({ error: 'المريض غير موجود أو لا يخص هذا الطبيب' });
+    }
+
+    // حذف الدواء
+    const medication = await Medication.findOneAndDelete({ _id: medicationId, patientId, doctorId });
+
+    if (!medication) {
+      return res.status(404).json({ error: 'الدواء غير موجود' });
+    }
+
+    res.json({ message: 'تم حذف الدواء بنجاح' });
+  } catch (error) {
+    console.error('خطأ في حذف الدواء:', error);
+    res.status(500).json({ error: 'خطأ في حذف الدواء' });
   }
 });
 
