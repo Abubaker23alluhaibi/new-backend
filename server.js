@@ -28,6 +28,8 @@ const crypto = require('crypto');
 const axios = require('axios');
 const http = require('http');
 const socketIo = require('socket.io');
+const csrf = require('csurf');
+const cookieParser = require('cookie-parser');
 
 const app = express();
 const server = http.createServer(app);
@@ -102,22 +104,42 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'"],
-      scriptSrc: ["'self'"],
-      imgSrc: ["'self'", "data:", "https:"],
-      connectSrc: ["'self'"],
-      fontSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+      scriptSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", "data:", "https:", "blob:"],
+      connectSrc: ["'self'", "https://api.cloudinary.com", "wss:", "ws:"],
+      fontSrc: ["'self'", "https://fonts.gstatic.com"],
       objectSrc: ["'none'"],
       mediaSrc: ["'self'"],
-      frameSrc: ["'none'"]
+      frameSrc: ["'none'"],
+      baseUri: ["'self'"],
+      formAction: ["'self'"],
+      frameAncestors: ["'none'"],
+      upgradeInsecureRequests: []
     }
   },
   hsts: {
     maxAge: 31536000,
     includeSubDomains: true,
     preload: true
-  }
+  },
+  noSniff: true,
+  xssFilter: true,
+  referrerPolicy: { policy: "strict-origin-when-cross-origin" }
 })); // حماية HTTP headers
+
+// إعداد cookie parser قبل CSRF
+app.use(cookieParser());
+
+// إعداد CSRF protection
+const csrfProtection = csrf({
+  cookie: {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'strict'
+  }
+});
+
 app.use(mongoSanitize()); // منع NoSQL injection
 app.use(express.json({ limit: '10mb' })); // تحديد حجم البيانات
 
@@ -127,7 +149,14 @@ app.use((req, res, next) => {
   if (req.body) {
     Object.keys(req.body).forEach(key => {
       if (typeof req.body[key] === 'string') {
-        req.body[key] = req.body[key].replace(/[<>]/g, '');
+        req.body[key] = req.body[key]
+          .replace(/[<>]/g, '')
+          .replace(/javascript:/gi, '')
+          .replace(/on\w+\s*=/gi, '')
+          .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+          .replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '')
+          .replace(/<object\b[^<]*(?:(?!<\/object>)<[^<]*)*<\/object>/gi, '')
+          .replace(/<embed\b[^<]*(?:(?!<\/embed>)<[^<]*)*<\/embed>/gi, '');
       }
     });
   }
@@ -512,10 +541,35 @@ const generateToken = (payload) => {
   return jwt.sign(payload, JWT_SECRET, JWT_OPTIONS);
 };
 
+// دالة إرسال التوكن في httpOnly cookie
+const setTokenCookie = (res, token) => {
+  res.cookie('token', token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'strict',
+    maxAge: 24 * 60 * 60 * 1000 // 24 ساعة
+  });
+};
+
+// دالة حذف التوكن من cookies
+const clearTokenCookie = (res) => {
+  res.clearCookie('token', {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'strict'
+  });
+};
+
 // دالة التحقق من JWT token
 const authenticateToken = (req, res, next) => {
+  // محاولة الحصول على التوكن من Authorization header أولاً
   const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
+  let token = authHeader && authHeader.split(' ')[1];
+  
+  // إذا لم يوجد في header، جرب من cookies
+  if (!token) {
+    token = req.cookies.token;
+  }
   
   if (!token) {
     // تأخير ثابت لمنع Timing Attacks
@@ -1203,11 +1257,13 @@ app.post('/login', async (req, res) => {
           // إنشاء JWT token
           const token = generateToken(adminUser);
           
+          // إرسال التوكن في httpOnly cookie
+          setTokenCookie(res, token);
+          
           return res.json({ 
             message: 'تم تسجيل الدخول بنجاح', 
             userType: 'admin', 
-            user: adminUser,
-            token: token
+            user: adminUser
           });
         }
       }
@@ -1231,11 +1287,13 @@ app.post('/login', async (req, res) => {
         // إنشاء JWT token
         const token = generateToken(doctorObj);
         
+        // إرسال التوكن في httpOnly cookie
+        setTokenCookie(res, token);
+        
         return res.json({ 
           message: 'تم تسجيل الدخول بنجاح', 
           userType: 'doctor', 
-          doctor: doctorObj,
-          token: token
+          doctor: doctorObj
         });
       }
       // إذا لم يوجد في جدول الأطباء، ابحث في جدول المستخدمين
@@ -1268,11 +1326,13 @@ app.post('/login', async (req, res) => {
         // إنشاء JWT token
         const token = generateToken(userObj);
         
+        // إرسال التوكن في httpOnly cookie
+        setTokenCookie(res, token);
+        
         return res.json({ 
           message: 'تم تسجيل الدخول بنجاح', 
           userType: 'user', 
-          user: userObj,
-          token: token
+          user: userObj
         });
       }
       // إذا لم يوجد في جدول المستخدمين، ابحث في جدول الأطباء
@@ -7392,6 +7452,29 @@ app.get('/api/doctors/:doctorId/patients/stats', async (req, res) => {
     console.error('خطأ في جلب إحصائيات المرضى:', error);
     res.status(500).json({ error: 'خطأ في جلب إحصائيات المرضى' });
   }
+});
+
+// ===== نقاط النهاية للمصادقة الآمنة =====
+
+// الحصول على التوكن من cookies
+app.get('/api/auth/token', (req, res) => {
+  const token = req.cookies.token;
+  if (token) {
+    res.json({ token });
+  } else {
+    res.status(401).json({ error: 'No token found' });
+  }
+});
+
+// التحقق من صحة التوكن
+app.get('/api/auth/validate', authenticateToken, (req, res) => {
+  res.json({ valid: true, user: req.user });
+});
+
+// تسجيل الخروج الآمن
+app.post('/logout', (req, res) => {
+  clearTokenCookie(res);
+  res.json({ message: 'تم تسجيل الخروج بنجاح' });
 });
 
 // ===== نقاط النهاية للمريض الحالي (/me) =====
