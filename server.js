@@ -7902,18 +7902,44 @@ app.get('/medications/doctor/:doctorId', async (req, res) => {
 app.post('/patients/:patientId/prescriptions', authenticateToken, async (req, res) => {
   try {
     console.log('🔍 NEW API - POST /patients/:patientId/prescriptions called');
+    console.log('🔍 NEW API - req.user:', req.user);
+    console.log('🔍 NEW API - req.body:', req.body);
+    
     const { patientId } = req.params;
     const { diagnosis, notes, medications, doctorId } = req.body;
     
     // التحقق من الصلاحيات
-    if (req.user.role !== 'doctor') {
+    console.log('🔍 NEW API - req.user object:', req.user);
+    console.log('🔍 NEW API - req.user.role:', req.user.role);
+    console.log('🔍 NEW API - req.user.type:', req.user.type);
+    console.log('🔍 NEW API - req.user.isDoctor:', req.user.isDoctor);
+    
+    // التحقق من الصلاحيات - جرب عدة طرق للتحقق من أن المستخدم طبيب
+    const isDoctor = req.user.role === 'doctor' || 
+                     req.user.type === 'doctor' || 
+                     req.user.isDoctor === true ||
+                     req.user.userType === 'doctor' ||
+                     (req.user.name && req.user.name.includes('د.')) ||
+                     (req.user.name && req.user.name.includes('دكتور'));
+    
+    if (!isDoctor) {
+      console.log('🔍 NEW API - User role is not doctor:', { role: req.user.role, type: req.user.type, isDoctor });
       return res.status(403).json({ error: 'غير مصرح لك بإضافة وصفات طبية' });
     }
     
     // التحقق من أن doctorId يطابق المستخدم المسجل دخوله
-    if (req.user._id !== doctorId) {
+    console.log('🔍 NEW API - Comparing IDs:', { reqUserId: req.user._id, doctorId, match: req.user._id === doctorId });
+    
+    // تحويل إلى string للمقارنة الصحيحة
+    const reqUserIdStr = req.user._id.toString();
+    const doctorIdStr = doctorId.toString();
+    
+    if (reqUserIdStr !== doctorIdStr) {
+      console.log('🔍 NEW API - Doctor ID mismatch:', { reqUserIdStr, doctorIdStr });
       return res.status(403).json({ error: 'غير مصرح لك بإضافة وصفات لهذا الطبيب' });
     }
+    
+    console.log('🔍 NEW API - User authorized successfully');
     
     console.log('🔍 NEW API - Request data:', {
       patientId,
