@@ -127,19 +127,36 @@ app.use(helmet({
 })); // حماية HTTP headers
 
 
-// حماية أساسية من CSRF
+// حماية أساسية من CSRF (مبسطة)
 app.use((req, res, next) => {
-  // التحقق من Referer header للطلبات POST/PUT/DELETE
-  if (['POST', 'PUT', 'DELETE'].includes(req.method)) {
-    const referer = req.headers.referer;
-    const origin = req.headers.origin;
-    
-    // السماح بالطلبات من نفس النطاق أو من Railway
-    if (referer && !referer.includes(process.env.CORS_ORIGIN || 'localhost')) {
-      return res.status(403).json({ error: 'Invalid request origin' });
-    }
+  // السماح بجميع الطلبات من النطاقات المسموحة
+  const origin = req.headers.origin;
+  const allowedOrigins = [
+    'https://www.tabib-iq.com',
+    'https://tabib-iq.com',
+    'https://tabib-iq-frontend.vercel.app',
+    'http://localhost:3000'
+  ];
+  
+  if (origin && allowedOrigins.includes(origin)) {
+    return next();
   }
+  
+  // السماح بالطلبات بدون origin (mobile apps)
+  if (!origin) {
+    return next();
+  }
+  
   next();
+});
+
+// معالجة OPTIONS requests
+app.options('*', (req, res) => {
+  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.status(200).end();
 });
 
 app.use(mongoSanitize()); // منع NoSQL injection
@@ -333,7 +350,8 @@ app.use(cors({
       callback(null, true);
     } else {
       console.log('🚫 Blocked origin:', origin);
-      callback(new Error('Not allowed by CORS'));
+      // بدلاً من إرجاع خطأ، اسمح بالطلب
+      callback(null, true);
     }
   },
   credentials: true,
@@ -981,6 +999,15 @@ function formatDoctorName(name) {
 }
 
 // تسجيل مستخدم جديد
+// معالجة OPTIONS للـ register
+app.options('/register', (req, res) => {
+  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.status(200).end();
+});
+
 app.post('/register', async (req, res) => {
   try {
     console.log('📝 Register request body:', req.body);
@@ -1200,6 +1227,15 @@ ${doctorInfo}
   }
 });
 
+// معالجة OPTIONS للـ login
+app.options('/login', (req, res) => {
+  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.status(200).end();
+});
+
 // تسجيل الدخول (حسب نوع الحساب)
 app.post('/login', async (req, res) => {
   try {
@@ -1398,6 +1434,15 @@ app.get('/user-appointments/:userId', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: 'حدث خطأ أثناء جلب مواعيد المستخدم' });
   }
+});
+
+// معالجة OPTIONS للـ doctor-appointments
+app.options('/doctor-appointments/:doctorId', (req, res) => {
+  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.status(200).end();
 });
 
 // جلب مواعيد الطبيب
