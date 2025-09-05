@@ -7946,12 +7946,45 @@ app.post('/patients/:patientId/prescriptions', async (req, res) => {
         });
       });
       
-      // فحص إضافي للتأكد من أن جميع الأدوية صحيحة
-      validMedications = medications.filter(med => 
-        med.name && med.dosage && med.frequency && med.duration
-      );
+      // التحقق من صحة الأدوية مع إضافة رسائل خطأ مفصلة
+      validMedications = medications.filter((med, index) => {
+        const isValid = med.name && med.dosage && med.frequency && med.duration;
+        if (!isValid) {
+          console.log(`🔍 NEW API - Medication ${index + 1} is invalid:`, {
+            name: med.name || 'MISSING',
+            dosage: med.dosage || 'MISSING',
+            frequency: med.frequency || 'MISSING',
+            duration: med.duration || 'MISSING'
+          });
+        }
+        return isValid;
+      });
+      
       console.log('🔍 NEW API - Valid medications count:', validMedications.length);
       console.log('🔍 NEW API - Valid medications:', validMedications);
+      
+      // إذا لم توجد أدوية صحيحة، استخدم الأدوية الأصلية مع تحذير
+      if (validMedications.length === 0 && medications.length > 0) {
+        console.log('🔍 NEW API - No valid medications found, using original medications with warning');
+        validMedications = medications;
+      }
+      
+      // تحقق إضافي: إذا كان عدد الأدوية الصحيحة أقل من الأصلية، أضف تحذير
+      if (validMedications.length < medications.length) {
+        console.log(`🔍 NEW API - WARNING: Only ${validMedications.length} out of ${medications.length} medications are valid`);
+        console.log('🔍 NEW API - Invalid medications details:');
+        medications.forEach((med, index) => {
+          const isValid = med.name && med.dosage && med.frequency && med.duration;
+          if (!isValid) {
+            console.log(`🔍 NEW API - Invalid medication ${index + 1}:`, {
+              name: med.name || 'MISSING',
+              dosage: med.dosage || 'MISSING', 
+              frequency: med.frequency || 'MISSING',
+              duration: med.duration || 'MISSING'
+            });
+          }
+        });
+      }
     } else {
       console.log('🔍 NEW API - medications is not an array or is null/undefined');
       validMedications = [];
@@ -7977,7 +8010,7 @@ app.post('/patients/:patientId/prescriptions', async (req, res) => {
       date: new Date(),
       diagnosis,
       notes,
-      medications: validMedications.length > 0 ? validMedications : medications || [],
+      medications: validMedications, // استخدام validMedications مباشرة
       isActive: true,
       createdBy: doctorId
     };
