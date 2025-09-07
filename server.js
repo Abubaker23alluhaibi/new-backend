@@ -3322,7 +3322,7 @@ app.put('/notifications/mark-read', async (req, res) => {
     let filter = {};
     if (doctorId) filter.doctorId = doctorId;
     if (userId) filter.userId = userId;
-    await Notification.updateMany(filter, { $set: { read: true } });
+    await Notification.updateMany(filter, { $set: { isRead: true, readAt: new Date() } });
     res.json({ message: 'تم تعليم الإشعارات كمقروءة' });
   } catch (err) {
     res.status(500).json({ error: 'حدث خطأ أثناء تعليم الإشعارات كمقروءة' });
@@ -3342,7 +3342,7 @@ app.post('/send-notification', async (req, res) => {
       doctorId: doctorId ? new mongoose.Types.ObjectId(doctorId) : null,
       type: type || 'general',
       message: message,
-      read: false
+      isRead: false
     });
     
     await notification.save();
@@ -8016,10 +8016,13 @@ app.get('/api/secure-files/*', (req, res, next) => {
 
     // تحميل الملف من Cloudinary وإرساله مباشرة
     try {
+      console.log('🔍 secure-files - attempting to fetch file from:', fileUrl);
       const response = await axios.get(fileUrl, {
         responseType: 'stream',
         timeout: 30000
       });
+      
+      console.log('✅ secure-files - file fetched successfully, content-type:', response.headers['content-type']);
       
       res.set({
         'Content-Type': response.headers['content-type'] || 'application/octet-stream',
@@ -8031,7 +8034,12 @@ app.get('/api/secure-files/*', (req, res, next) => {
       
       response.data.pipe(res);
     } catch (fetchError) {
-      console.error('Error fetching file from Cloudinary:', fetchError);
+      console.error('❌ secure-files - Error fetching file from Cloudinary:', fetchError.message);
+      console.error('❌ secure-files - Error details:', {
+        status: fetchError.response?.status,
+        statusText: fetchError.response?.statusText,
+        data: fetchError.response?.data
+      });
       // في حالة فشل التحميل، إعادة توجيه للملف الأصلي
       res.redirect(fileUrl);
     }
