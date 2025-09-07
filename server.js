@@ -3316,12 +3316,21 @@ app.get('/debug-db', async (req, res) => {
 
 
 // تعليم كل إشعارات الدكتور كمقروءة
-app.put('/notifications/mark-read', async (req, res) => {
+app.put('/notifications/mark-read', authenticateToken, async (req, res) => {
   try {
     const { doctorId, userId } = req.query;
+    const currentUser = req.user;
+    
+    // التحقق من أن المستخدم يطلب إشعاراته فقط
     let filter = {};
-    if (doctorId) filter.doctorId = doctorId;
-    if (userId) filter.userId = userId;
+    if (doctorId && currentUser.user_type === 'doctor' && currentUser._id.toString() === doctorId) {
+      filter.doctorId = doctorId;
+    } else if (userId && currentUser.user_type === 'user' && currentUser._id.toString() === userId) {
+      filter.userId = userId;
+    } else {
+      return res.status(403).json({ error: 'غير مخول للوصول لهذه الإشعارات' });
+    }
+    
     await Notification.updateMany(filter, { $set: { isRead: true, readAt: new Date() } });
     res.json({ message: 'تم تعليم الإشعارات كمقروءة' });
   } catch (err) {
