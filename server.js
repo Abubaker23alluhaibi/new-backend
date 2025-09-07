@@ -2777,14 +2777,28 @@ app.get('/doctor-appointments/:doctorId', async (req, res) => {
 });
 
 // إلغاء موعد
-app.delete('/appointments/:id', async (req, res) => {
+app.delete('/appointments/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const appointment = await Appointment.findByIdAndDelete(id);
+    const currentUser = req.user;
+    
+    // البحث عن الموعد أولاً للتحقق من وجوده
+    const appointment = await Appointment.findById(id);
     
     if (!appointment) {
       return res.status(404).json({ error: 'الموعد غير موجود' });
     }
+    
+    // التحقق من أن المستخدم يملك الموعد (طبيب أو مريض)
+    const isOwner = (currentUser.user_type === 'doctor' && appointment.doctorId === currentUser._id.toString()) ||
+                   (currentUser.user_type === 'user' && appointment.userId === currentUser._id.toString());
+    
+    if (!isOwner) {
+      return res.status(403).json({ error: 'غير مخول لإلغاء هذا الموعد' });
+    }
+    
+    // حذف الموعد
+    await Appointment.findByIdAndDelete(id);
     
     // إرسال إشعار للمريض عند إلغاء الموعد
     try {
