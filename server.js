@@ -1302,7 +1302,7 @@ app.post('/login', async (req, res) => {
         return res.json({ 
           message: 'تم تسجيل الدخول بنجاح', 
           userType: 'doctor', 
-          doctor: doctorObj,
+          user: doctorObj,
           token: token
         });
       }
@@ -4966,7 +4966,8 @@ const employeeSchema = new mongoose.Schema({
           MANAGE_SPECIAL_APPOINTMENTS: { type: Boolean, default: false },
           MANAGE_APPOINTMENT_DURATION: { type: Boolean, default: false },
           VIEW_BOOKINGS_STATS: { type: Boolean, default: false },
-          MANAGE_PATIENTS: { type: Boolean, default: false }
+          MANAGE_PATIENTS: { type: Boolean, default: false },
+          ACCESS_DASHBOARD: { type: Boolean, default: true } // صلاحية الوصول للصفحة الرئيسية
         },
   isActive: { type: Boolean, default: true },
   createdAt: { type: Date, default: Date.now },
@@ -5099,12 +5100,28 @@ app.post('/employees', async (req, res) => {
     // إنشاء رمز دخول عشوائي
     const accessCode = generateAccessCode();
     
+    // الصلاحيات الافتراضية للموظفين
+    const defaultPermissions = {
+      VIEW_APPOINTMENTS: true,
+      VIEW_CALENDAR: true,
+      VIEW_PROFILE: true,
+      ACCESS_DASHBOARD: true, // صلاحية الوصول للصفحة الرئيسية
+      MANAGE_APPOINTMENTS: false,
+      MANAGE_WORK_TIMES: false,
+      VIEW_ANALYTICS: false,
+      MANAGE_EMPLOYEES: false,
+      MANAGE_SPECIAL_APPOINTMENTS: false,
+      MANAGE_APPOINTMENT_DURATION: false,
+      VIEW_BOOKINGS_STATS: false,
+      MANAGE_PATIENTS: false
+    };
+
     const employee = new Employee({
       doctorId,
       name,
       employeeType,
       accessCode,
-      permissions: permissions || {}
+      permissions: { ...defaultPermissions, ...(permissions || {}) }
     });
     
     await employee.save();
