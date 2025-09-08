@@ -7999,6 +7999,7 @@ app.get('/api/secure-files/*', (req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET');
   res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  res.header('Access-Control-Allow-Credentials', 'true');
   next();
 }, async (req, res) => {
   try {
@@ -8084,6 +8085,25 @@ app.get('/api/secure-files/*', (req, res, next) => {
 
   } catch (error) {
     console.error('خطأ في تحميل الملف الآمن:', error);
+    res.status(500).json({ error: 'خطأ في تحميل الملف' });
+  }
+});
+
+// ===== تحميل الملفات مباشرة بدون حماية =====
+app.get('/api/files/*', async (req, res) => {
+  try {
+    const fileUrl = req.params[0];
+    console.log('🔍 files - fileUrl:', fileUrl);
+    
+    // إضافة CORS headers
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Methods', 'GET');
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+    
+    // إعادة توجيه مباشر للملف
+    res.redirect(fileUrl);
+  } catch (error) {
+    console.error('خطأ في تحميل الملف:', error);
     res.status(500).json({ error: 'خطأ في تحميل الملف' });
   }
 });
