@@ -7237,10 +7237,13 @@ app.post('/api/patients/:patientId/medical-reports', authenticateToken, requireU
       return res.status(400).json({ error: 'معرف المريض غير صحيح' });
     }
 
-    if (!title || !file) {
-      console.log('❌ medical-reports upload - missing title or file:', { title, file: !!file });
-      return res.status(400).json({ error: 'العنوان والملف مطلوبان' });
+    if (!file) {
+      console.log('❌ medical-reports upload - missing file:', { file: !!file });
+      return res.status(400).json({ error: 'الملف مطلوب' });
     }
+    
+    // استخدام اسم الملف كعنوان إذا لم يتم توفير عنوان
+    const finalTitle = title || file.originalname;
 
     // رفع الملف إلى Cloudinary
     console.log('🔍 medical-reports upload - uploading to Cloudinary...');
@@ -7274,10 +7277,11 @@ app.post('/api/patients/:patientId/medical-reports', authenticateToken, requireU
     // إضافة التقرير الطبي
     console.log('🔍 medical-reports upload - adding report to patient...');
     patient.medicalReports.push({
-      title,
-      description,
+      title: finalTitle,
+      description: description || `ملف ${file.mimetype.includes('pdf') ? 'PDF' : 'صورة'}`,
       fileUrl: result.secure_url,
-      fileType: file.mimetype
+      fileType: file.mimetype,
+      uploadDate: new Date()
     });
 
     await patient.save();
@@ -7310,10 +7314,13 @@ app.post('/api/patients/:patientId/examinations', authenticateToken, requireUser
       return res.status(400).json({ error: 'معرف المريض غير صحيح' });
     }
 
-    if (!title || !file) {
-      console.log('❌ examinations upload - missing title or file:', { title, file: !!file });
-      return res.status(400).json({ error: 'العنوان والملف مطلوبان' });
+    if (!file) {
+      console.log('❌ examinations upload - missing file:', { file: !!file });
+      return res.status(400).json({ error: 'الملف مطلوب' });
     }
+    
+    // استخدام اسم الملف كعنوان إذا لم يتم توفير عنوان
+    const finalTitle = title || file.originalname;
 
     // رفع الملف إلى Cloudinary
     console.log('🔍 examinations upload - uploading to Cloudinary...');
@@ -7347,10 +7354,11 @@ app.post('/api/patients/:patientId/examinations', authenticateToken, requireUser
     // إضافة الفحص الطبي
     console.log('🔍 examinations upload - adding examination to patient...');
     patient.examinations.push({
-      title,
-      description,
+      title: finalTitle,
+      description: description || `ملف ${file.mimetype.includes('pdf') ? 'PDF' : 'صورة'}`,
       fileUrl: result.secure_url,
-      fileType: file.mimetype
+      fileType: file.mimetype,
+      uploadDate: new Date()
     });
 
     await patient.save();
@@ -8011,7 +8019,14 @@ app.get('/api/secure-files/*', (req, res, next) => {
     let user;
     try {
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      user = await User.findById(decoded.userId);
+      
+      // البحث في جدول الأطباء أولاً
+      user = await Doctor.findById(decoded.userId);
+      if (!user) {
+        // إذا لم يوجد في الأطباء، ابحث في المستخدمين
+        user = await User.findById(decoded.userId);
+      }
+      
       if (!user) {
         throw new Error('User not found');
       }
