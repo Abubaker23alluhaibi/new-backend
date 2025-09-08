@@ -584,6 +584,7 @@ const authenticateToken = (req, res, next) => {
       }, 100);
       return;
     }
+    console.log('🔍 JWT Token decoded:', { user_type: user.user_type, _id: user._id, userId: user.userId });
     req.user = user;
     next();
   });
@@ -1265,7 +1266,7 @@ app.post('/login', async (req, res) => {
             email: admin.email, 
             user_type: 'admin', 
             name: admin.name,
-            _id: admin._id 
+            _id: admin._id.toString() 
           };
           
           // إنشاء JWT token
@@ -1295,6 +1296,8 @@ app.post('/login', async (req, res) => {
         if (!valid) return res.status(400).json({ error: 'بيانات الدخول غير صحيحة' });
         const doctorObj = doctor.toObject();
         doctorObj.user_type = 'doctor';
+        // تحويل _id إلى string للتأكد من التوافق
+        doctorObj._id = doctorObj._id.toString();
         
         // إنشاء JWT token
         const token = generateToken(doctorObj);
@@ -1332,6 +1335,8 @@ app.post('/login', async (req, res) => {
         if (!valid) return res.status(400).json({ error: 'بيانات الدخول غير صحيحة' });
         const userObj = user.toObject();
         userObj.user_type = 'user';
+        // تحويل _id إلى string للتأكد من التوافق
+        userObj._id = userObj._id.toString();
         
         // إنشاء JWT token
         const token = generateToken(userObj);
@@ -1450,8 +1455,11 @@ app.get('/doctor-appointments/:doctorId', async (req, res) => {
   try {
     const { doctorId } = req.params;
     
+    console.log('🔍 Debug doctor-appointments:', { doctorId, isValid: mongoose.Types.ObjectId.isValid(doctorId) });
+    
     // التحقق من صحة doctorId
     if (!mongoose.Types.ObjectId.isValid(doctorId)) {
+      console.log('❌ Invalid doctorId:', doctorId);
       return res.status(400).json({ error: 'معرف الطبيب غير صحيح' });
     }
     
@@ -2790,8 +2798,28 @@ app.delete('/appointments/:id', authenticateToken, async (req, res) => {
     }
     
     // التحقق من أن المستخدم يملك الموعد (طبيب أو مريض)
-    const isOwner = (currentUser.user_type === 'doctor' && appointment.doctorId === currentUser._id.toString()) ||
-                   (currentUser.user_type === 'user' && appointment.userId === currentUser._id.toString());
+    console.log('🔍 Debug appointment deletion:');
+    console.log('  - currentUser:', { 
+      user_type: currentUser.user_type, 
+      _id: currentUser._id, 
+      _id_type: typeof currentUser._id,
+      full_user: currentUser 
+    });
+    console.log('  - appointment:', { 
+      doctorId: appointment.doctorId, 
+      userId: appointment.userId,
+      doctorId_type: typeof appointment.doctorId,
+      userId_type: typeof appointment.userId
+    });
+    console.log('  - doctorId comparison:', appointment.doctorId.toString(), '===', currentUser._id.toString(), '?', appointment.doctorId.toString() === currentUser._id.toString());
+    console.log('  - userId comparison:', appointment.userId.toString(), '===', currentUser._id.toString(), '?', appointment.userId.toString() === currentUser._id.toString());
+    
+    const isOwner = (currentUser.user_type === 'doctor' && appointment.doctorId.toString() === currentUser._id.toString()) ||
+                   (currentUser.user_type === 'user' && appointment.userId.toString() === currentUser._id.toString());
+    
+    console.log('  - isOwner:', isOwner);
+    console.log('  - doctor check:', currentUser.user_type === 'doctor', appointment.doctorId.toString() === currentUser._id.toString());
+    console.log('  - user check:', currentUser.user_type === 'user', appointment.userId.toString() === currentUser._id.toString());
     
     if (!isOwner) {
       return res.status(403).json({ error: 'غير مخول لإلغاء هذا الموعد' });
@@ -4070,6 +4098,37 @@ app.put('/api/appointments/:id/attendance', async (req, res) => {
     res.json({ message: 'تم تحديث حالة الحضور بنجاح', appointment });
   } catch (error) {
     res.status(500).json({ error: 'خطأ في تحديث حالة الحضور' });
+  }
+});
+
+// إلغاء موعد (للأدمن)
+app.delete('/api/appointments/:id', authenticateToken, requireUserType(['admin']), async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // البحث عن الموعد أولاً للتحقق من وجوده
+    const appointment = await Appointment.findById(id);
+    
+    if (!appointment) {
+      return res.status(404).json({ error: 'الموعد غير موجود' });
+    }
+    
+    // حذف الموعد
+    await Appointment.findByIdAndDelete(id);
+    
+    res.json({ 
+      message: 'تم إلغاء الموعد بنجاح',
+      cancelledAppointment: {
+        id: appointment._id,
+        patientName: appointment.patientName || appointment.userName,
+        bookerName: appointment.bookerName || appointment.userName,
+        date: appointment.date,
+        time: appointment.time,
+        isBookingForOther: appointment.isBookingForOther
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'حدث خطأ أثناء إلغاء الموعد' });
   }
 });
 
