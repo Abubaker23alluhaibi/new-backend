@@ -27,43 +27,9 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const axios = require('axios');
 const http = require('http');
-const socketIo = require('socket.io');
 
 const app = express();
 const server = http.createServer(app);
-
-// إعداد Socket.IO
-const io = socketIo(server, {
-  cors: {
-    origin: process.env.CORS_ORIGIN || "*",
-    methods: ["GET", "POST"]
-  }
-});
-
-// جعل io متاحاً عالمياً
-global.io = io;
-
-// معالجة اتصالات WebSocket
-io.on('connection', (socket) => {
-  console.log('👤 مستخدم متصل:', socket.id);
-  
-  // انضمام المستخدم إلى غرفة خاصة
-  socket.on('join_user_room', (userId) => {
-    socket.join(`user_${userId}`);
-    console.log(`👤 المستخدم ${userId} انضم إلى غرفته الخاصة`);
-  });
-  
-  // انضمام الطبيب إلى غرفة خاصة
-  socket.on('join_doctor_room', (doctorId) => {
-    socket.join(`doctor_${doctorId}`);
-    console.log(`👨‍⚕️ الطبيب ${doctorId} انضم إلى غرفته الخاصة`);
-  });
-  
-  // معالجة انقطاع الاتصال
-  socket.on('disconnect', () => {
-    console.log('👤 مستخدم منقطع:', socket.id);
-  });
-});
 
 // ===== Health Check Endpoints (يجب أن تكون في البداية) =====
 app.get('/health', (req, res) => {
@@ -2387,37 +2353,7 @@ app.post('/appointments', async (req, res) => {
         message: notificationMessage
       });
 
-      // إرسال إشعار فوري عبر WebSocket للدكتور
-      if (io) {
-        io.to(`doctor_${doctorId}`).emit('new_appointment', {
-          appointmentId: appointment._id,
-          patientName: finalPatientName,
-          bookerName: finalBookerName,
-          date: date,
-          time: time,
-          reason: reason,
-          patientAge: patientAge,
-          isBookingForOther: isBookingForOther,
-          message: notificationMessage
-        });
-        console.log(`📱 تم إرسال إشعار فوري للدكتور ${doctorId} عن موعد جديد`);
-      }
-      
-      // إرسال إشعار عبر WebSocket الجديد للدكتور أيضاً
-      sendWebSocketNotification(doctorId, {
-        type: 'new_appointment',
-        title: 'موعد جديد',
-        body: notificationMessage,
-        appointmentId: appointment._id,
-        patientName: finalPatientName,
-        bookerName: finalBookerName,
-        date: date,
-        time: time,
-        reason: reason,
-        patientAge: patientAge,
-        isBookingForOther: isBookingForOther,
-        timestamp: new Date().toISOString()
-      });
+      // تم حذف الإشعارات الفورية - الإشعارات محفوظة في قاعدة البيانات فقط
 
     } catch (notificationError) {
       // لا نوقف العملية إذا فشل إنشاء الإشعار
@@ -2581,21 +2517,7 @@ app.post('/appointments-for-other', async (req, res) => {
         message: notificationMessage
       });
 
-      // إرسال إشعار فوري عبر WebSocket للدكتور
-      if (io) {
-        io.to(`doctor_${doctorId}`).emit('new_appointment', {
-          appointmentId: appointment._id,
-          patientName: patientName,
-          bookerName: bookerName || userName,
-          date: date,
-          time: time,
-          reason: reason,
-          patientAge: patientAge,
-          isBookingForOther: true,
-          message: notificationMessage
-        });
-        console.log(`📱 تم إرسال إشعار فوري للدكتور ${doctorId} عن موعد جديد (لشخص آخر)`);
-      }
+      // تم حذف الإشعارات الفورية - الإشعارات محفوظة في قاعدة البيانات فقط
 
     } catch (notificationError) {
       // لا نوقف العملية إذا فشل إنشاء الإشعار
@@ -2848,31 +2770,7 @@ app.delete('/appointments/:id', authenticateToken, async (req, res) => {
       
       console.log(`✅ تم إرسال إشعار إلغاء الموعد للمريض: ${appointment.patientName || appointment.userName}`);
       
-      // إرسال إشعار فوري عبر WebSocket (إذا كان متاحاً)
-      if (global.io) {
-        global.io.to(`user_${appointment.userId}`).emit('appointment_cancelled', {
-          type: 'appointment_cancelled',
-          message: notificationMessage,
-          appointmentId: appointment._id,
-          doctorName: appointment.doctorName,
-          date: appointment.date,
-          time: appointment.time,
-          timestamp: new Date().toISOString()
-        });
-        console.log(`📡 تم إرسال إشعار WebSocket للمستخدم: ${appointment.userId}`);
-      }
-      
-      // إرسال إشعار عبر WebSocket الجديد أيضاً
-      sendWebSocketNotification(appointment.userId, {
-        type: 'appointment_cancelled',
-        title: 'تم إلغاء الموعد',
-        body: notificationMessage,
-        appointmentId: appointment._id,
-        doctorName: appointment.doctorName,
-        date: appointment.date,
-        time: appointment.time,
-        timestamp: new Date().toISOString()
-      });
+      // تم حذف الإشعارات الفورية - الإشعارات محفوظة في قاعدة البيانات فقط
       
     } catch (notificationError) {
       // لا نوقف العملية إذا فشل إنشاء الإشعار
@@ -3219,83 +3117,7 @@ app.options('/notifications/ws/:userId', (req, res) => {
   res.end();
 });
 
-// WebSocket endpoint للإشعارات الفورية
-app.get('/notifications/ws/:userId', (req, res) => {
-  const { userId } = req.params;
-  
-  // إعداد headers للـ WebSocket مع CORS محسن
-  res.writeHead(200, {
-    'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache',
-    'Connection': 'keep-alive',
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Cache-Control, Authorization, X-Requested-With',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Credentials': 'true',
-    'X-Accel-Buffering': 'no' // مهم لـ Nginx
-  });
-
-  console.log(`🔌 WebSocket connection established for user: ${userId}`);
-
-  // إرسال رسالة ترحيب
-  res.write(`data: ${JSON.stringify({ 
-    type: 'connected', 
-    message: 'تم الاتصال بنجاح',
-    userId: userId,
-    timestamp: new Date().toISOString()
-  })}\n\n`);
-
-  // إضافة المستخدم إلى قائمة المستمعين
-  if (!global.websocketClients) {
-    global.websocketClients = new Map();
-  }
-  
-  global.websocketClients.set(userId, res);
-
-  // إرسال ping كل 30 ثانية للحفاظ على الاتصال
-  const pingInterval = setInterval(() => {
-    try {
-      res.write(`data: ${JSON.stringify({ 
-        type: 'ping', 
-        timestamp: new Date().toISOString() 
-      })}\n\n`);
-    } catch (error) {
-      console.log(`❌ Error sending ping to user ${userId}:`, error);
-      clearInterval(pingInterval);
-      global.websocketClients?.delete(userId);
-    }
-  }, 30000);
-
-  // معالجة انقطاع الاتصال
-  req.on('close', () => {
-    console.log(`🔌 WebSocket connection closed for user: ${userId}`);
-    clearInterval(pingInterval);
-    global.websocketClients?.delete(userId);
-  });
-
-  req.on('error', (error) => {
-    console.log(`❌ WebSocket error for user ${userId}:`, error);
-    clearInterval(pingInterval);
-    global.websocketClients?.delete(userId);
-  });
-});
-
-// دالة مساعدة لإرسال إشعار عبر WebSocket
-const sendWebSocketNotification = (userId, notification) => {
-  const client = global.websocketClients?.get(userId);
-  if (client) {
-    try {
-      client.write(`data: ${JSON.stringify(notification)}\n\n`);
-      console.log(`📡 تم إرسال إشعار WebSocket للمستخدم: ${userId}`);
-      return true;
-    } catch (error) {
-      console.log(`❌ خطأ في إرسال إشعار WebSocket للمستخدم ${userId}:`, error);
-      global.websocketClients?.delete(userId);
-      return false;
-    }
-  }
-  return false;
-};
+// تم حذف WebSocket endpoints - الإشعارات تعمل عبر قاعدة البيانات فقط
 
 // نقطة نهائية لاختبار إنشاء إشعار
 app.post('/test-notification', async (req, res) => {
@@ -5452,7 +5274,7 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log('🚀 Server started successfully!');
   console.log(`🌐 Server running on port ${PORT}`);
   console.log(`🔗 Health check: http://localhost:${PORT}/health`);
-  console.log(`🔌 WebSocket server is running`);
+  console.log(`📡 Server ready for requests`);
   console.log(`🔗 API Health check: http://localhost:${PORT}/api/health`);
   console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`⏰ Started at: ${new Date().toISOString()}`);
@@ -5573,19 +5395,7 @@ app.post('/add-special-appointment', async (req, res) => {
         });
         await notification.save();
 
-        // إرسال إشعار فوري عبر WebSocket للمريض
-        if (io) {
-          io.to(`user_${foundUser._id}`).emit('special_appointment', {
-            appointmentId: appointment._id,
-            doctorName: doctorName,
-            date: date,
-            time: time,
-            reason: reason,
-            notes: notes,
-            message: `تم حجز موعد خاص لك مع الطبيب ${doctorName} بتاريخ ${date} الساعة ${time}`
-          });
-          console.log(`📱 تم إرسال إشعار فوري للمريض ${foundUser._id} عن موعد خاص`);
-        }
+        // تم حذف الإشعارات الفورية - الإشعارات محفوظة في قاعدة البيانات فقط
       }
       // أرسل إشعار أيضًا عبر دالة الإشعار المركزية
       const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
