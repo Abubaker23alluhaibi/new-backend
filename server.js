@@ -791,6 +791,19 @@ const notificationSchema = new mongoose.Schema({
 });
 const Notification = mongoose.model('Notification', notificationSchema);
 
+// مخطط رموز الإشعارات
+const notificationTokenSchema = new mongoose.Schema({
+  token: { type: String, required: true, unique: true },
+  platform: { type: String, required: true, enum: ['ios', 'android'] },
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  doctorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Doctor' },
+  isActive: { type: Boolean, default: true },
+  lastUsed: { type: Date, default: Date.now },
+  createdAt: { type: Date, default: Date.now }
+});
+
+const NotificationToken = mongoose.model('NotificationToken', notificationTokenSchema);
+
 // مخطط الأطباء المميزين
 const featuredDoctorSchema = new mongoose.Schema({
   doctorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Doctor', required: true },
@@ -2770,7 +2783,30 @@ app.delete('/appointments/:id', authenticateToken, async (req, res) => {
       
       console.log(`✅ تم إرسال إشعار إلغاء الموعد للمريض: ${appointment.patientName || appointment.userName}`);
       
-      // تم حذف الإشعارات الفورية - الإشعارات محفوظة في قاعدة البيانات فقط
+      // إرسال push notification للمريض
+      try {
+        const pushResponse = await axios.post(`${process.env.API_URL || 'http://localhost:3000'}/notifications/send-push-user`, {
+          userId: appointment.userId.toString(),
+          title: 'تم إلغاء الموعد',
+          body: notificationMessage,
+          data: {
+            type: 'appointment_cancelled',
+            appointmentId: appointment._id.toString(),
+            doctorName: appointment.doctorName,
+            date: appointment.date,
+            time: appointment.time
+          },
+          timestamp: new Date().toISOString()
+        });
+        
+        if (pushResponse.data.success) {
+          console.log(`✅ تم إرسال push notification للمريض: ${appointment.patientName || appointment.userName}`);
+        } else {
+          console.log(`⚠️ فشل في إرسال push notification للمريض: ${pushResponse.data.error}`);
+        }
+      } catch (pushError) {
+        console.error('❌ خطأ في إرسال push notification للمريض:', pushError.message);
+      }
       
     } catch (notificationError) {
       // لا نوقف العملية إذا فشل إنشاء الإشعار
@@ -3326,6 +3362,332 @@ app.post('/send-special-appointment-notification', async (req, res) => {
   }
 });
 
+// ===== إعدادات الإشعارات المحسنة =====
+
+// تسجيل رمز الإشعارات للجهاز
+app.post('/notifications/register', async (req, res) => {
+  try {
+    const { token, platform, userId, doctorId } = req.body;
+    
+    if (!token || !platform) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'رمز الإشعارات ومنصة الجهاز مطلوبان' 
+      });
+    }
+
+    // حفظ رمز الإشعارات في قاعدة البيانات
+    const notificationToken = new NotificationToken({
+      token,
+      platform,
+      userId: userId ? new mongoose.Types.ObjectId(userId) : null,
+      doctorId: doctorId ? new mongoose.Types.ObjectId(doctorId) : null,
+      isActive: true,
+      lastUsed: new Date()
+    });
+
+    await notificationToken.save();
+
+    console.log(`✅ تم تسجيل رمز الإشعارات: ${platform} - ${token.substring(0, 20)}...`);
+    
+    res.json({ 
+      success: true, 
+      message: 'تم تسجيل رمز الإشعارات بنجاح',
+      tokenId: notificationToken._id
+    });
+  } catch (err) {
+    console.error('❌ خطأ في تسجيل رمز الإشعارات:', err);
+    res.status(500).json({ 
+      success: false, 
+      error: 'حدث خطأ أثناء تسجيل رمز الإشعارات',
+      details: err.message 
+    });
+  }
+});
+
+// إرسال push notification للمستخدم
+app.post('/notifications/send-push-user', async (req, res) => {
+  try {
+    const { userId, title, body, data, timestamp } = req.body;
+    
+    if (!userId || !title || !body) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'معرف المستخدم والعنوان والمحتوى مطلوبان' 
+      });
+    }
+
+    // البحث عن رمز الإشعارات للمستخدم
+    const notificationToken = await NotificationToken.findOne({
+      userId: new mongoose.Types.ObjectId(userId),
+      isActive: true
+    });
+
+    if (!notificationToken) {
+      console.log(`⚠️ لم يتم العثور على رمز إشعارات للمستخدم: ${userId}`);
+      return res.status(404).json({ 
+        success: false, 
+        error: 'لم يتم العثور على رمز إشعارات للمستخدم' 
+      });
+    }
+
+    // إنشاء الإشعار في قاعدة البيانات
+    const notification = new Notification({
+      userId: new mongoose.Types.ObjectId(userId),
+      type: data?.type || 'general',
+      message: body,
+      title: title,
+      data: data || {},
+      isRead: false,
+      priority: 'high',
+      immediate: true
+    });
+
+    await notification.save();
+
+    // إرسال push notification عبر Expo
+    const pushMessage = {
+      to: notificationToken.token,
+      title: title,
+      body: body,
+      data: {
+        ...data,
+        notificationId: notification._id.toString(),
+        timestamp: timestamp || new Date().toISOString()
+      },
+      sound: 'default',
+      priority: 'high',
+      channelId: 'appointment_cancellation'
+    };
+
+    // إرسال الإشعار عبر Expo Push API
+    const expoResponse = await axios.post('https://exp.host/--/api/v2/push/send', pushMessage, {
+      headers: {
+        'Accept': 'application/json',
+        'Accept-encoding': 'gzip, deflate',
+        'Content-Type': 'application/json',
+      }
+    });
+
+    if (expoResponse.data.data && expoResponse.data.data[0].status === 'ok') {
+      console.log(`✅ تم إرسال push notification للمستخدم ${userId}: ${title}`);
+      
+      // تحديث آخر استخدام للرمز
+      notificationToken.lastUsed = new Date();
+      await notificationToken.save();
+
+      res.json({ 
+        success: true, 
+        message: 'تم إرسال الإشعار بنجاح',
+        notification: {
+          id: notification._id,
+          title: notification.title,
+          message: notification.message,
+          createdAt: notification.createdAt
+        },
+        expoResponse: expoResponse.data
+      });
+    } else {
+      console.log(`⚠️ فشل في إرسال push notification:`, expoResponse.data);
+      res.status(500).json({ 
+        success: false, 
+        error: 'فشل في إرسال الإشعار',
+        details: expoResponse.data 
+      });
+    }
+  } catch (err) {
+    console.error('❌ خطأ في إرسال push notification:', err);
+    res.status(500).json({ 
+      success: false, 
+      error: 'حدث خطأ أثناء إرسال الإشعار',
+      details: err.message 
+    });
+  }
+});
+
+// إرسال push notification للطبيب
+app.post('/notifications/send-push-doctor', async (req, res) => {
+  try {
+    const { doctorId, title, body, data, timestamp } = req.body;
+    
+    if (!doctorId || !title || !body) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'معرف الطبيب والعنوان والمحتوى مطلوبان' 
+      });
+    }
+
+    // البحث عن رمز الإشعارات للطبيب
+    const notificationToken = await NotificationToken.findOne({
+      doctorId: new mongoose.Types.ObjectId(doctorId),
+      isActive: true
+    });
+
+    if (!notificationToken) {
+      console.log(`⚠️ لم يتم العثور على رمز إشعارات للطبيب: ${doctorId}`);
+      return res.status(404).json({ 
+        success: false, 
+        error: 'لم يتم العثور على رمز إشعارات للطبيب' 
+      });
+    }
+
+    // إنشاء الإشعار في قاعدة البيانات
+    const notification = new Notification({
+      doctorId: new mongoose.Types.ObjectId(doctorId),
+      type: data?.type || 'general',
+      message: body,
+      title: title,
+      data: data || {},
+      isRead: false,
+      priority: 'high',
+      immediate: true
+    });
+
+    await notification.save();
+
+    // إرسال push notification عبر Expo
+    const pushMessage = {
+      to: notificationToken.token,
+      title: title,
+      body: body,
+      data: {
+        ...data,
+        notificationId: notification._id.toString(),
+        timestamp: timestamp || new Date().toISOString()
+      },
+      sound: 'default',
+      priority: 'high',
+      channelId: 'appointments'
+    };
+
+    // إرسال الإشعار عبر Expo Push API
+    const expoResponse = await axios.post('https://exp.host/--/api/v2/push/send', pushMessage, {
+      headers: {
+        'Accept': 'application/json',
+        'Accept-encoding': 'gzip, deflate',
+        'Content-Type': 'application/json',
+      }
+    });
+
+    if (expoResponse.data.data && expoResponse.data.data[0].status === 'ok') {
+      console.log(`✅ تم إرسال push notification للطبيب ${doctorId}: ${title}`);
+      
+      // تحديث آخر استخدام للرمز
+      notificationToken.lastUsed = new Date();
+      await notificationToken.save();
+
+      res.json({ 
+        success: true, 
+        message: 'تم إرسال الإشعار للطبيب بنجاح',
+        notification: {
+          id: notification._id,
+          title: notification.title,
+          message: notification.message,
+          createdAt: notification.createdAt
+        },
+        expoResponse: expoResponse.data
+      });
+    } else {
+      console.log(`⚠️ فشل في إرسال push notification للطبيب:`, expoResponse.data);
+      res.status(500).json({ 
+        success: false, 
+        error: 'فشل في إرسال الإشعار للطبيب',
+        details: expoResponse.data 
+      });
+    }
+  } catch (err) {
+    console.error('❌ خطأ في إرسال push notification للطبيب:', err);
+    res.status(500).json({ 
+      success: false, 
+      error: 'حدث خطأ أثناء إرسال الإشعار للطبيب',
+      details: err.message 
+    });
+  }
+});
+
+// ===== إدارة الإشعارات =====
+
+// تحديد إشعار كمقروء
+app.post('/notifications/:id/mark-read', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const notification = await Notification.findByIdAndUpdate(
+      id,
+      { 
+        isRead: true, 
+        readAt: new Date() 
+      },
+      { new: true }
+    );
+    
+    if (!notification) {
+      return res.status(404).json({ 
+        success: false, 
+        error: 'الإشعار غير موجود' 
+      });
+    }
+    
+    console.log(`✅ تم تحديد الإشعار كمقروء: ${id}`);
+    
+    res.json({ 
+      success: true, 
+      message: 'تم تحديد الإشعار كمقروء',
+      notification: {
+        id: notification._id,
+        isRead: notification.isRead,
+        readAt: notification.readAt
+      }
+    });
+  } catch (err) {
+    console.error('❌ خطأ في تحديد الإشعار كمقروء:', err);
+    res.status(500).json({ 
+      success: false, 
+      error: 'حدث خطأ أثناء تحديد الإشعار كمقروء',
+      details: err.message 
+    });
+  }
+});
+
+// تحديد جميع إشعارات مستخدم كمقروءة
+app.post('/notifications/mark-all-read', async (req, res) => {
+  try {
+    const { userId } = req.body;
+    
+    if (!userId) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'معرف المستخدم مطلوب' 
+      });
+    }
+    
+    const result = await Notification.updateMany(
+      { 
+        userId: new mongoose.Types.ObjectId(userId),
+        isRead: false 
+      },
+      { 
+        isRead: true, 
+        readAt: new Date() 
+      }
+    );
+    
+    console.log(`✅ تم تحديد ${result.modifiedCount} إشعار كمقروء للمستخدم: ${userId}`);
+    
+    res.json({ 
+      success: true, 
+      message: `تم تحديد ${result.modifiedCount} إشعار كمقروء`,
+      modifiedCount: result.modifiedCount
+    });
+  } catch (err) {
+    console.error('❌ خطأ في تحديد جميع الإشعارات كمقروءة:', err);
+    res.status(500).json({ 
+      success: false, 
+      error: 'حدث خطأ أثناء تحديد جميع الإشعارات كمقروءة',
+      details: err.message 
+    });
+  }
+});
 
 // ===== API للأطباء المميزين =====
 
