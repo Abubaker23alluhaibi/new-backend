@@ -3453,11 +3453,31 @@ app.post('/notifications/send-push-user', async (req, res) => {
       data: {
         ...data,
         notificationId: notification._id.toString(),
-        timestamp: timestamp || new Date().toISOString()
+        timestamp: timestamp || new Date().toISOString(),
+        isPushNotification: true, // علامة للإشعار من الخادم
+        urgent: true // إشعار عاجل
       },
       sound: 'default',
       priority: 'high',
-      channelId: 'appointment_cancellation'
+      channelId: 'appointment_cancellation',
+      // إعدادات إضافية للأندرويد
+      android: {
+        priority: 'high',
+        channelId: 'appointment_cancellation',
+        sound: 'default',
+        vibrate: [0, 1000, 500, 1000, 500, 1000],
+        color: '#FF0000',
+        visibility: 'public',
+        autoCancel: false,
+        ongoing: false,
+        showTimestamp: true
+      },
+      // إعدادات iOS
+      ios: {
+        sound: 'default',
+        badge: 1,
+        priority: 'high'
+      }
     };
 
     // إرسال الإشعار عبر Expo Push API
