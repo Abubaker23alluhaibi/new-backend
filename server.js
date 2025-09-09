@@ -7870,7 +7870,6 @@ app.post('/doctors/me/patients', authenticateToken, requireUserType(['doctor']),
       emergencyContact,
       medicalHistory,
       allergies,
-      medications,
       notes
     });
 
@@ -8022,6 +8021,12 @@ app.get('/doctors/me/patients/stats', authenticateToken, requireUserType(['docto
     const doctorId = req.user._id;
     console.log('🔍 patients/stats - doctorId:', doctorId);
 
+    // التحقق من صحة معرف الطبيب
+    if (!mongoose.Types.ObjectId.isValid(doctorId)) {
+      console.error('❌ Invalid doctorId:', doctorId);
+      return res.status(400).json({ error: 'معرف الطبيب غير صحيح' });
+    }
+
     const stats = await Patient.aggregate([
       { $match: { doctorId: new mongoose.Types.ObjectId(doctorId) } },
       {
@@ -8057,6 +8062,11 @@ app.get('/doctors/me/patients/stats', authenticateToken, requireUserType(['docto
 
   } catch (error) {
     console.error('خطأ في جلب إحصائيات المرضى:', error);
+    console.error('Error details:', {
+      message: error.message,
+      stack: error.stack,
+      doctorId: req.user?._id
+    });
     res.status(500).json({ error: 'خطأ في جلب إحصائيات المرضى' });
   }
 });
