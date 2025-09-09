@@ -522,9 +522,50 @@ const JWT_OPTIONS = {
   algorithm: 'HS256'
 };
 
-// دالة إنشاء JWT token
+// إعدادات JWT مختلفة حسب نوع المستخدم
+const JWT_OPTIONS_PATIENT = {
+  expiresIn: '365d', // سنة واحدة للمرضى (دائمة عملياً)
+  issuer: 'tabibiq-app',
+  audience: 'tabibiq-users',
+  algorithm: 'HS256'
+};
+
+const JWT_OPTIONS_DOCTOR = {
+  expiresIn: '7d', // أسبوع واحد للأطباء
+  issuer: 'tabibiq-app',
+  audience: 'tabibiq-users',
+  algorithm: 'HS256'
+};
+
+const JWT_OPTIONS_ADMIN = {
+  expiresIn: '24h', // 24 ساعة للأدمن
+  issuer: 'tabibiq-app',
+  audience: 'tabibiq-users',
+  algorithm: 'HS256'
+};
+
+// دالة إنشاء JWT token حسب نوع المستخدم
 const generateToken = (payload) => {
-  return jwt.sign(payload, JWT_SECRET, JWT_OPTIONS);
+  const userType = payload.user_type || payload.userType;
+  
+  let options;
+  switch (userType) {
+    case 'user':
+    case 'patient':
+      options = JWT_OPTIONS_PATIENT;
+      break;
+    case 'doctor':
+      options = JWT_OPTIONS_DOCTOR;
+      break;
+    case 'admin':
+      options = JWT_OPTIONS_ADMIN;
+      break;
+    default:
+      options = JWT_OPTIONS;
+  }
+  
+  console.log(`🔐 إنشاء JWT token لـ ${userType} مع صلاحية: ${options.expiresIn}`);
+  return jwt.sign(payload, JWT_SECRET, options);
 };
 
 
@@ -544,9 +585,33 @@ const authenticateToken = (req, res, next) => {
   jwt.verify(token, JWT_SECRET, (err, user) => {
     if (err) {
       console.log('❌ JWT verification failed:', err.message);
+      
+      let errorMessage = 'Invalid or expired token';
+      if (err.name === 'TokenExpiredError') {
+        const userType = user?.user_type || 'unknown';
+        switch (userType) {
+          case 'user':
+          case 'patient':
+            errorMessage = 'انتهت صلاحية جلسة المريض. يرجى تسجيل الدخول مرة أخرى';
+            break;
+          case 'doctor':
+            errorMessage = 'انتهت صلاحية جلسة الطبيب. يرجى تسجيل الدخول مرة أخرى';
+            break;
+          case 'admin':
+            errorMessage = 'انتهت صلاحية جلسة الإدارة. يرجى تسجيل الدخول مرة أخرى';
+            break;
+          default:
+            errorMessage = 'انتهت صلاحية الجلسة. يرجى تسجيل الدخول مرة أخرى';
+        }
+      }
+      
       // تأخير ثابت لمنع Timing Attacks
       setTimeout(() => {
-        return res.status(403).json({ error: 'Invalid or expired token' });
+        return res.status(403).json({ 
+          error: errorMessage,
+          expired: err.name === 'TokenExpiredError',
+          userType: user?.user_type || 'unknown'
+        });
       }, 100);
       return;
     }
@@ -554,6 +619,40 @@ const authenticateToken = (req, res, next) => {
     req.user = user;
     next();
   });
+};
+
+// دالة تجديد JWT token
+const refreshToken = (req, res) => {
+  try {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+    
+    if (!token) {
+      return res.status(401).json({ error: 'Access token required' });
+    }
+    
+    // التحقق من صحة الـ token الحالي
+    jwt.verify(token, JWT_SECRET, (err, user) => {
+      if (err) {
+        return res.status(403).json({ error: 'Invalid token' });
+      }
+      
+      // إنشاء token جديد بنفس البيانات
+      const newToken = generateToken(user);
+      
+      console.log(`🔄 تم تجديد JWT token لـ ${user.user_type}`);
+      
+      res.json({
+        success: true,
+        token: newToken,
+        userType: user.user_type,
+        message: 'تم تجديد الجلسة بنجاح'
+      });
+    });
+  } catch (error) {
+    console.error('❌ خطأ في تجديد الـ token:', error);
+    res.status(500).json({ error: 'حدث خطأ في تجديد الجلسة' });
+  }
 };
 
 // دالة التحقق من نوع المستخدم
@@ -1347,6 +1446,9 @@ app.post('/login', async (req, res) => {
     res.status(500).json({ error: 'حدث خطأ أثناء تسجيل الدخول' });
   }
 });
+
+// تجديد JWT token
+app.post('/refresh-token', refreshToken);
 
 // رفع صورة (مثلاً صورة بروفايل أو رسالة)
 app.post('/upload', upload.single('image'), (req, res) => {
