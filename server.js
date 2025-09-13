@@ -2393,8 +2393,15 @@ app.post('/appointments', async (req, res) => {
       bookerName // اسم الشخص الذي قام بالحجز
     } = req.body;
     
-    if (!userId || !doctorId || !date || !time || !patientAge) {
+    // السماح بـ userId فارغ للحجز لشخص آخر
+    if (!doctorId || !date || !time || !patientAge) {
       return res.status(400).json({ error: 'البيانات ناقصة - العمر مطلوب' });
+    }
+    
+    // إذا كان الحجز لشخص آخر وليس لدينا userId، استخدم قيمة افتراضية
+    if (isBookingForOther && !userId) {
+      // يمكن استخدام null أو إنشاء معرف مؤقت
+      // سنستخدم null ونعاملها في قاعدة البيانات
     }
     
     // التحقق من صحة العمر
@@ -2420,12 +2427,23 @@ app.post('/appointments', async (req, res) => {
     }
     
     // التحقق من وجود موعد مكرر قبل الإنشاء
-    const existingAppointment = await Appointment.findOne({
-      userId: userId,
-      doctorId: new mongoose.Types.ObjectId(doctorId),
-      date: date,
-      time: time
-    });
+    // للحجز لشخص آخر، نتحقق من رقم الهاتف بدلاً من userId
+    let existingAppointment;
+    if (isBookingForOther && !userId && patientPhone) {
+      existingAppointment = await Appointment.findOne({
+        doctorId: new mongoose.Types.ObjectId(doctorId),
+        date: date,
+        time: time,
+        patientPhone: patientPhone
+      });
+    } else {
+      existingAppointment = await Appointment.findOne({
+        userId: userId,
+        doctorId: new mongoose.Types.ObjectId(doctorId),
+        date: date,
+        time: time
+      });
+    }
     
     if (existingAppointment) {
       return res.status(400).json({ error: 'هذا الموعد محجوز مسبقاً' });
@@ -2571,8 +2589,15 @@ app.post('/appointments-for-other', async (req, res) => {
       bookerName // اسم الشخص الذي قام بالحجز
     } = req.body;
     
-    if (!userId || !doctorId || !date || !time || !patientAge || !patientName) {
+    // السماح بـ userId فارغ للحجز لشخص آخر
+    if (!doctorId || !date || !time || !patientAge || !patientName) {
       return res.status(400).json({ error: 'البيانات ناقصة - العمر واسم المريض مطلوبان' });
+    }
+    
+    // إذا كان الحجز لشخص آخر وليس لدينا userId، استخدم قيمة افتراضية
+    if (!userId) {
+      // يمكن استخدام null أو إنشاء معرف مؤقت
+      // سنستخدم null ونعاملها في قاعدة البيانات
     }
     
     // التحقق من صحة العمر
@@ -2593,12 +2618,23 @@ app.post('/appointments-for-other', async (req, res) => {
     }
     
     // التحقق من وجود موعد مكرر قبل الإنشاء
-    const existingAppointment = await Appointment.findOne({
-      userId: userId,
-      doctorId: new mongoose.Types.ObjectId(doctorId),
-      date: date,
-      time: time
-    });
+    // للحجز لشخص آخر، نتحقق من رقم الهاتف بدلاً من userId
+    let existingAppointment;
+    if (!userId && patientPhone) {
+      existingAppointment = await Appointment.findOne({
+        doctorId: new mongoose.Types.ObjectId(doctorId),
+        date: date,
+        time: time,
+        patientPhone: patientPhone
+      });
+    } else {
+      existingAppointment = await Appointment.findOne({
+        userId: userId,
+        doctorId: new mongoose.Types.ObjectId(doctorId),
+        date: date,
+        time: time
+      });
+    }
     
     if (existingAppointment) {
       return res.status(400).json({ error: 'هذا الموعد محجوز مسبقاً' });
