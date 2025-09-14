@@ -8175,56 +8175,38 @@ app.get('/doctors/me/patients/:patientId', authenticateToken, requireUserType(['
 // إحصائيات مرضى الطبيب الحالي
 app.get('/doctors/me/patients/stats', authenticateToken, requireUserType(['doctor']), async (req, res) => {
   try {
-    console.log('🔍 patients/stats - req.user:', req.user);
     const doctorId = req.user._id;
-    console.log('🔍 patients/stats - doctorId:', doctorId);
 
-    // التحقق من صحة معرف الطبيب
     if (!mongoose.Types.ObjectId.isValid(doctorId)) {
-      console.error('❌ Invalid doctorId:', doctorId);
       return res.status(400).json({ error: 'معرف الطبيب غير صحيح' });
     }
 
-    const stats = await Patient.aggregate([
-      { $match: { doctorId: new mongoose.Types.ObjectId(doctorId) } },
-      {
-        $group: {
-          _id: null,
-          totalPatients: { $sum: 1 },
-          activePatients: { $sum: { $cond: [{ $eq: ['$status', 'active'] }, 1, 0] } },
-          inactivePatients: { $sum: { $cond: [{ $eq: ['$status', 'inactive'] }, 1, 0] } },
-          malePatients: { $sum: { $cond: [{ $eq: ['$gender', 'male'] }, 1, 0] } },
-          femalePatients: { $sum: { $cond: [{ $eq: ['$gender', 'female'] }, 1, 0] } },
-          avgAge: { $avg: '$age' }
-        }
-      }
-    ]);
-
-    const result = stats[0] || {
-      totalPatients: 0,
-      activePatients: 0,
-      inactivePatients: 0,
-      malePatients: 0,
-      femalePatients: 0,
-      avgAge: 0
-    };
+    // حساب الإحصائيات مباشرة
+    const totalPatients = await Patient.countDocuments({ doctorId: new mongoose.Types.ObjectId(doctorId) });
+    const activePatients = await Patient.countDocuments({ 
+      doctorId: new mongoose.Types.ObjectId(doctorId), 
+      status: 'active' 
+    });
+    const malePatients = await Patient.countDocuments({ 
+      doctorId: new mongoose.Types.ObjectId(doctorId), 
+      gender: 'male' 
+    });
+    const femalePatients = await Patient.countDocuments({ 
+      doctorId: new mongoose.Types.ObjectId(doctorId), 
+      gender: 'female' 
+    });
 
     res.json({
-      total: result.totalPatients,
-      active: result.activePatients,
-      inactive: result.inactivePatients,
-      male: result.malePatients,
-      female: result.femalePatients,
-      avgAge: Math.round(result.avgAge || 0)
+      total: totalPatients,
+      active: activePatients,
+      inactive: totalPatients - activePatients,
+      male: malePatients,
+      female: femalePatients,
+      avgAge: 0
     });
 
   } catch (error) {
     console.error('خطأ في جلب إحصائيات المرضى:', error);
-    console.error('Error details:', {
-      message: error.message,
-      stack: error.stack,
-      doctorId: req.user?._id
-    });
     res.status(500).json({ error: 'خطأ في جلب إحصائيات المرضى' });
   }
 });
