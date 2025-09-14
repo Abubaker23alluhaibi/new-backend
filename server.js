@@ -8098,7 +8098,7 @@ app.put('/doctors/me/patients/:patientId', authenticateToken, requireUserType(['
         emergencyContact,
         medicalHistory,
         allergies,
-        medications,
+        // medications, // تم إزالة هذا الحقل لأنه غير معرف
         notes,
         status,
         updatedAt: new Date()
