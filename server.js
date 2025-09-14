@@ -5473,6 +5473,8 @@ const medicationSchema = new mongoose.Schema({
   patientId: { type: mongoose.Schema.Types.ObjectId, ref: 'Patient', required: true },
   doctorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Doctor', required: true },
   prescriptionId: { type: String, required: true }, // معرف الوصفة الطبية
+  diagnosis: String, // التشخيص
+  prescriptionNotes: String, // ملاحظات الوصفة الطبية
   name: { type: String, required: true }, // اسم الدواء
   dosage: { type: String, required: true }, // الجرعة
   frequency: { type: String, required: true }, // التكرار
@@ -8305,7 +8307,7 @@ app.post('/doctors/me/patients/:patientId/medications', authenticateToken, requi
   try {
     const { patientId } = req.params;
     const doctorId = req.user._id;
-    const { prescriptionId, name, dosage, frequency, duration, instructions, notes } = req.body;
+    const { prescriptionId, diagnosis, prescriptionNotes, name, dosage, frequency, duration, instructions, notes } = req.body;
 
     // التحقق من صحة معرف المريض
     if (!mongoose.Types.ObjectId.isValid(patientId)) {
@@ -8330,6 +8332,8 @@ app.post('/doctors/me/patients/:patientId/medications', authenticateToken, requi
       patientId,
       doctorId,
       prescriptionId,
+      diagnosis,
+      prescriptionNotes,
       name,
       dosage,
       frequency,
