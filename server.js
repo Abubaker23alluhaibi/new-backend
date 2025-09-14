@@ -5425,7 +5425,7 @@ const patientSchema = new mongoose.Schema({
   },
   chiefComplaint: String, // ما يشكو منه المريض
   chronicDiseases: String, // الأمراض المزمنة
-  otherConditions: String, // أمراض أخرى
+  chronicMedications: String, // الأدوية المزمنة
   emergencyContact: {
     name: String,
     phone: String,
@@ -7991,7 +7991,7 @@ app.get('/doctors/me/patients', authenticateToken, requireUserType(['doctor']), 
 app.post('/doctors/me/patients', authenticateToken, requireUserType(['doctor']), async (req, res) => {
   try {
     const doctorId = req.user._id;
-    const { name, age, phone, gender, address, bloodType, chiefComplaint, chronicDiseases, otherConditions, emergencyContact, medicalHistory, allergies, notes } = req.body;
+    const { name, age, phone, gender, address, bloodType, chiefComplaint, chronicDiseases, chronicMedications, emergencyContact, medicalHistory, allergies, notes } = req.body;
 
     // التحقق من الحقول المطلوبة
     if (!name || !age || !phone || !gender) {
@@ -8024,7 +8024,7 @@ app.post('/doctors/me/patients', authenticateToken, requireUserType(['doctor']),
       bloodType: bloodType || 'غير محدد',
       chiefComplaint,
       chronicDiseases,
-      otherConditions,
+      chronicMedications,
       emergencyContact,
       medicalHistory,
       allergies,
@@ -8049,7 +8049,7 @@ app.put('/doctors/me/patients/:patientId', authenticateToken, requireUserType(['
   try {
     const doctorId = req.user._id;
     const { patientId } = req.params;
-    const { name, age, phone, gender, address, bloodType, chiefComplaint, chronicDiseases, otherConditions, emergencyContact, medicalHistory, allergies, notes, status } = req.body;
+    const { name, age, phone, gender, address, bloodType, chiefComplaint, chronicDiseases, chronicMedications, emergencyContact, medicalHistory, allergies, notes, status } = req.body;
 
     // التحقق من صحة معرف المريض
     if (!mongoose.Types.ObjectId.isValid(patientId)) {
@@ -8094,7 +8094,7 @@ app.put('/doctors/me/patients/:patientId', authenticateToken, requireUserType(['
         bloodType: bloodType || 'غير محدد',
         chiefComplaint,
         chronicDiseases,
-        otherConditions,
+        chronicMedications,
         emergencyContact,
         medicalHistory,
         allergies,
