@@ -8185,23 +8185,23 @@ app.get('/doctors/me/patients/stats', authenticateToken, requireUserType(['docto
 
     // حساب الإحصائيات مباشرة
     console.log('🔍 جاري حساب إحصائيات المرضى...');
-    const totalPatients = await Patient.countDocuments({ doctorId: new mongoose.Types.ObjectId(doctorId) });
+    const totalPatients = await Patient.countDocuments({ doctorId: doctorId });
     console.log('📊 إجمالي المرضى:', totalPatients);
     
     const activePatients = await Patient.countDocuments({ 
-      doctorId: new mongoose.Types.ObjectId(doctorId), 
+      doctorId: doctorId, 
       status: 'active' 
     });
     console.log('📊 المرضى النشطين:', activePatients);
     
     const malePatients = await Patient.countDocuments({ 
-      doctorId: new mongoose.Types.ObjectId(doctorId), 
+      doctorId: doctorId, 
       gender: 'male' 
     });
     console.log('📊 المرضى الذكور:', malePatients);
     
     const femalePatients = await Patient.countDocuments({ 
-      doctorId: new mongoose.Types.ObjectId(doctorId), 
+      doctorId: doctorId, 
       gender: 'female' 
     });
     console.log('📊 المرضى الإناث:', femalePatients);
@@ -8211,7 +8211,7 @@ app.get('/doctors/me/patients/stats', authenticateToken, requireUserType(['docto
       console.log('🔧 لا يوجد مرضى، جاري إضافة مريض تجريبي...');
       try {
         const testPatient = new Patient({
-          doctorId: new mongoose.Types.ObjectId(doctorId),
+          doctorId: doctorId,
           name: 'مريض تجريبي',
           age: 30,
           phone: '+964770123456',
@@ -8223,17 +8223,17 @@ app.get('/doctors/me/patients/stats', authenticateToken, requireUserType(['docto
         console.log('✅ تم إضافة مريض تجريبي بنجاح');
         
         // إعادة حساب الإحصائيات
-        const newTotalPatients = await Patient.countDocuments({ doctorId: new mongoose.Types.ObjectId(doctorId) });
+        const newTotalPatients = await Patient.countDocuments({ doctorId: doctorId });
         const newActivePatients = await Patient.countDocuments({ 
-          doctorId: new mongoose.Types.ObjectId(doctorId), 
+          doctorId: doctorId, 
           status: 'active' 
         });
         const newMalePatients = await Patient.countDocuments({ 
-          doctorId: new mongoose.Types.ObjectId(doctorId), 
+          doctorId: doctorId, 
           gender: 'male' 
         });
         const newFemalePatients = await Patient.countDocuments({ 
-          doctorId: new mongoose.Types.ObjectId(doctorId), 
+          doctorId: doctorId, 
           gender: 'female' 
         });
 
