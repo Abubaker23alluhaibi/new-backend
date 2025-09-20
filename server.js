@@ -7876,11 +7876,68 @@ app.get('/doctors/me/patients', authenticateToken, requireUserType(['doctor']), 
     
     // إضافة البحث إذا تم توفيره
     if (search) {
-      query.$or = [
+      const searchConditions = [
         { name: { $regex: search, $options: 'i' } },
-        { phone: { $regex: search, $options: 'i' } },
         { address: { $regex: search, $options: 'i' } }
       ];
+
+      // تحسين البحث في أرقام الهواتف العراقية
+      const phoneSearchConditions = [];
+      
+      // البحث المباشر
+      phoneSearchConditions.push({ phone: { $regex: search, $options: 'i' } });
+      
+      // إذا كان البحث يبدأ بـ 07، أضف البحث بـ +9647
+      if (search.startsWith('07')) {
+        const internationalFormat = '+964' + search.substring(1);
+        phoneSearchConditions.push({ phone: { $regex: internationalFormat, $options: 'i' } });
+      }
+      
+      // إذا كان البحث يبدأ بـ 7، أضف البحث بـ 07 و +9647
+      if (search.startsWith('7')) {
+        const withZero = '0' + search;
+        const internationalFormat = '+964' + search;
+        phoneSearchConditions.push({ phone: { $regex: withZero, $options: 'i' } });
+        phoneSearchConditions.push({ phone: { $regex: internationalFormat, $options: 'i' } });
+      }
+      
+      // إذا كان البحث يبدأ بـ +9647، أضف البحث بـ 07 و 7
+      if (search.startsWith('+9647')) {
+        const withoutCountryCode = search.substring(4); // إزالة +964
+        const withZero = '0' + withoutCountryCode;
+        phoneSearchConditions.push({ phone: { $regex: withoutCountryCode, $options: 'i' } });
+        phoneSearchConditions.push({ phone: { $regex: withZero, $options: 'i' } });
+      }
+      
+      // إذا كان البحث يبدأ بـ +964، أضف البحث بـ 0
+      if (search.startsWith('+964')) {
+        const withoutCountryCode = search.substring(4);
+        const withZero = '0' + withoutCountryCode;
+        phoneSearchConditions.push({ phone: { $regex: withoutCountryCode, $options: 'i' } });
+        phoneSearchConditions.push({ phone: { $regex: withZero, $options: 'i' } });
+      }
+      
+      // إذا كان البحث يبدأ بـ 964، أضف البحث بـ 07 و +9647
+      if (search.startsWith('964')) {
+        const withZero = '0' + search.substring(3);
+        const withPlus = '+' + search;
+        phoneSearchConditions.push({ phone: { $regex: withZero, $options: 'i' } });
+        phoneSearchConditions.push({ phone: { $regex: withPlus, $options: 'i' } });
+        phoneSearchConditions.push({ phone: { $regex: search.substring(3), $options: 'i' } });
+      }
+      
+      // إذا كان البحث يحتوي على 7 في البداية (رقم عراقي)
+      if (/^7\d+$/.test(search)) {
+        const withZero = '0' + search;
+        const withPlus = '+964' + search;
+        phoneSearchConditions.push({ phone: { $regex: withZero, $options: 'i' } });
+        phoneSearchConditions.push({ phone: { $regex: withPlus, $options: 'i' } });
+      }
+
+      // إضافة شروط البحث في الهاتف
+      searchConditions.push(...phoneSearchConditions);
+
+      query.$or = searchConditions;
     }
 
     // حساب التخطي للصفحات
