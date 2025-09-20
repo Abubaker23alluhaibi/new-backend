@@ -7876,66 +7876,67 @@ app.get('/doctors/me/patients', authenticateToken, requireUserType(['doctor']), 
     
     // إضافة البحث إذا تم توفيره
     if (search) {
+      console.log('🔍 البحث عن:', search);
+      
+      // تنظيف البحث من المسافات الزائدة
+      const cleanSearch = search.trim();
+      
       const searchConditions = [
-        { name: { $regex: search, $options: 'i' } },
-        { address: { $regex: search, $options: 'i' } }
+        { name: { $regex: cleanSearch, $options: 'i' } },
+        { address: { $regex: cleanSearch, $options: 'i' } }
       ];
 
-      // تحسين البحث في أرقام الهواتف العراقية
-      const phoneSearchConditions = [];
+      // البحث في أرقام الهواتف - نسخة مبسطة جداً
+      const phonePatterns = [];
       
-      // البحث المباشر
-      phoneSearchConditions.push({ phone: { $regex: search, $options: 'i' } });
+      // 1. البحث المباشر في الهاتف
+      phonePatterns.push({ phone: { $regex: cleanSearch, $options: 'i' } });
       
-      // إذا كان البحث يبدأ بـ 07، أضف البحث بـ +9647
-      if (search.startsWith('07')) {
-        const internationalFormat = '+964' + search.substring(1);
-        phoneSearchConditions.push({ phone: { $regex: internationalFormat, $options: 'i' } });
+      // 2. إذا كان البحث رقم (يحتوي على أرقام فقط أو يبدأ بـ +)
+      if (/^[\d+]+$/.test(cleanSearch)) {
+        console.log('🔍 البحث في رقم هاتف:', cleanSearch);
+        
+        // إذا كان البحث يبدأ بـ 7 (رقم عراقي)
+        if (cleanSearch.startsWith('7')) {
+          phonePatterns.push({ phone: { $regex: '0' + cleanSearch, $options: 'i' } });
+          phonePatterns.push({ phone: { $regex: '\\+964' + cleanSearch, $options: 'i' } });
+        }
+        
+        // إذا كان البحث يبدأ بـ 07
+        if (cleanSearch.startsWith('07')) {
+          phonePatterns.push({ phone: { $regex: '\\+964' + cleanSearch.substring(1), $options: 'i' } });
+        }
+        
+        // إذا كان البحث يبدأ بـ +964
+        if (cleanSearch.startsWith('+964')) {
+          const withoutCountryCode = cleanSearch.substring(4);
+          phonePatterns.push({ phone: { $regex: '0' + withoutCountryCode, $options: 'i' } });
+          phonePatterns.push({ phone: { $regex: withoutCountryCode, $options: 'i' } });
+        }
+        
+        // إذا كان البحث يبدأ بـ 964
+        if (cleanSearch.startsWith('964')) {
+          const withoutCountryCode = cleanSearch.substring(3);
+          phonePatterns.push({ phone: { $regex: '0' + withoutCountryCode, $options: 'i' } });
+          phonePatterns.push({ phone: { $regex: '\\+' + cleanSearch, $options: 'i' } });
+        }
       }
       
-      // إذا كان البحث يبدأ بـ 7، أضف البحث بـ 07 و +9647
-      if (search.startsWith('7')) {
-        const withZero = '0' + search;
-        const internationalFormat = '+964' + search;
-        phoneSearchConditions.push({ phone: { $regex: withZero, $options: 'i' } });
-        phoneSearchConditions.push({ phone: { $regex: internationalFormat, $options: 'i' } });
-      }
-      
-      // إذا كان البحث يبدأ بـ +9647، أضف البحث بـ 07 و 7
-      if (search.startsWith('+9647')) {
-        const withoutCountryCode = search.substring(4); // إزالة +964
-        const withZero = '0' + withoutCountryCode;
-        phoneSearchConditions.push({ phone: { $regex: withoutCountryCode, $options: 'i' } });
-        phoneSearchConditions.push({ phone: { $regex: withZero, $options: 'i' } });
-      }
-      
-      // إذا كان البحث يبدأ بـ +964، أضف البحث بـ 0
-      if (search.startsWith('+964')) {
-        const withoutCountryCode = search.substring(4);
-        const withZero = '0' + withoutCountryCode;
-        phoneSearchConditions.push({ phone: { $regex: withoutCountryCode, $options: 'i' } });
-        phoneSearchConditions.push({ phone: { $regex: withZero, $options: 'i' } });
-      }
-      
-      // إذا كان البحث يبدأ بـ 964، أضف البحث بـ 07 و +9647
-      if (search.startsWith('964')) {
-        const withZero = '0' + search.substring(3);
-        const withPlus = '+' + search;
-        phoneSearchConditions.push({ phone: { $regex: withZero, $options: 'i' } });
-        phoneSearchConditions.push({ phone: { $regex: withPlus, $options: 'i' } });
-        phoneSearchConditions.push({ phone: { $regex: search.substring(3), $options: 'i' } });
-      }
-      
-      // إذا كان البحث يحتوي على 7 في البداية (رقم عراقي)
-      if (/^7\d+$/.test(search)) {
-        const withZero = '0' + search;
-        const withPlus = '+964' + search;
-        phoneSearchConditions.push({ phone: { $regex: withZero, $options: 'i' } });
-        phoneSearchConditions.push({ phone: { $regex: withPlus, $options: 'i' } });
+      // 3. بحث إضافي - إذا كان البحث يحتوي على أرقام فقط
+      if (/^\d+$/.test(cleanSearch)) {
+        console.log('🔍 البحث في أرقام فقط:', cleanSearch);
+        
+        // إضافة 0 في البداية
+        phonePatterns.push({ phone: { $regex: '0' + cleanSearch, $options: 'i' } });
+        
+        // إضافة +964 في البداية
+        phonePatterns.push({ phone: { $regex: '\\+964' + cleanSearch, $options: 'i' } });
       }
 
-      // إضافة شروط البحث في الهاتف
-      searchConditions.push(...phoneSearchConditions);
+      // إضافة جميع أنماط البحث في الهاتف
+      searchConditions.push(...phonePatterns);
+      
+      console.log('🔍 شروط البحث:', searchConditions);
 
       query.$or = searchConditions;
     }
@@ -7944,15 +7945,21 @@ app.get('/doctors/me/patients', authenticateToken, requireUserType(['doctor']), 
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const sortOptions = { [sortBy]: sortOrder === 'desc' ? -1 : 1 };
 
+    console.log('🔍 الاستعلام النهائي:', JSON.stringify(query, null, 2));
+    
     // جلب المرضى مع التصفح
     const patients = await Patient.find(query)
       .sort(sortOptions)
       .skip(skip)
       .limit(parseInt(limit));
 
+    console.log('🔍 عدد المرضى الموجدين:', patients.length);
+
     // حساب العدد الإجمالي
     const total = await Patient.countDocuments(query);
     const totalPages = Math.ceil(total / parseInt(limit));
+    
+    console.log('🔍 العدد الإجمالي:', total);
 
     res.json({
       patients: patients,
