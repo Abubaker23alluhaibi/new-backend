@@ -5791,12 +5791,21 @@ app.post('/recover-doctor-access-code', async (req, res) => {
     
     // التحقق من الرمز الأصلي للحساب (البريد الإلكتروني أو كلمة المرور)
     const isValidEmail = originalAccountCode === doctor.email;
-    const isValidPassword = originalAccountCode === doctor.password;
+    let isValidPassword = false;
+    
+    // التحقق من كلمة المرور باستخدام bcrypt
+    if (doctor.password) {
+      try {
+        isValidPassword = await bcrypt.compare(originalAccountCode, doctor.password);
+      } catch (error) {
+        console.error('خطأ في التحقق من كلمة المرور:', error);
+        isValidPassword = false;
+      }
+    }
     
     console.log('🔍 التحقق من الرمز:', { 
       entered: originalAccountCode, 
       doctorEmail: doctor.email,
-      doctorPassword: doctor.password,
       isValidEmail: isValidEmail,
       isValidPassword: isValidPassword,
       doctorId: doctorId 
