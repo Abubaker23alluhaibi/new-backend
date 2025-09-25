@@ -5768,6 +5768,39 @@ app.post('/setup-doctor-access-code', async (req, res) => {
   }
 });
 
+// استعادة رمز الدكتور المنسي باستخدام الرمز الأصلي للحساب
+app.post('/recover-doctor-access-code', async (req, res) => {
+  try {
+    const { doctorId, originalAccountCode } = req.body;
+    
+    // التحقق من وجود الدكتور
+    const doctor = await Doctor.findById(doctorId);
+    if (!doctor) {
+      return res.status(404).json({ error: 'الدكتور غير موجود' });
+    }
+    
+    // التحقق من الرمز الأصلي للحساب (هذا الرمز الذي أنشأته إدارة النظام)
+    // يمكنك تعديل هذا التحقق حسب نظام الرموز الأصلي لديك
+    if (originalAccountCode !== doctor.originalAccessCode) {
+      return res.status(401).json({ error: 'الرمز الأصلي للحساب غير صحيح' });
+    }
+    
+    // إرجاع معلومات الدكتور للسماح له بالوصول للوحة التحكم
+    res.json({ 
+      success: true, 
+      message: 'تم التحقق من الرمز الأصلي بنجاح',
+      doctor: {
+        id: doctor._id,
+        name: doctor.name,
+        email: doctor.email
+      }
+    });
+  } catch (error) {
+    console.error('خطأ في استعادة رمز الدكتور:', error);
+    res.status(500).json({ error: 'حدث خطأ في استعادة الرمز' });
+  }
+});
+
 // التحقق من وجود موظفين للدكتور
 app.get('/doctor-has-employees/:doctorId', async (req, res) => {
   try {
