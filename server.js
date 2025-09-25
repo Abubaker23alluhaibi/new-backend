@@ -5789,8 +5789,7 @@ app.post('/recover-doctor-access-code', async (req, res) => {
       return res.status(404).json({ error: 'الدكتور غير موجود' });
     }
     
-    // التحقق من الرمز الأصلي للحساب (البريد الإلكتروني أو كلمة المرور)
-    const isValidEmail = originalAccountCode === doctor.email;
+    // التحقق من الرمز الأصلي للحساب (كلمة المرور فقط)
     let isValidPassword = false;
     
     // التحقق من كلمة المرور باستخدام bcrypt
@@ -5806,12 +5805,11 @@ app.post('/recover-doctor-access-code', async (req, res) => {
     console.log('🔍 التحقق من الرمز:', { 
       entered: originalAccountCode, 
       doctorEmail: doctor.email,
-      isValidEmail: isValidEmail,
       isValidPassword: isValidPassword,
       doctorId: doctorId 
     });
     
-    if (!isValidEmail && !isValidPassword) {
+    if (!isValidPassword) {
       console.log('❌ رمز غير صحيح:', { 
         entered: originalAccountCode, 
         doctorEmail: doctor.email,
