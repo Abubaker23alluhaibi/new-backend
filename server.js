@@ -5768,7 +5768,7 @@ app.post('/setup-doctor-access-code', async (req, res) => {
   }
 });
 
-// استعادة رمز الدكتور المنسي باستخدام الرمز الأصلي للحساب
+// استعادة رمز الدكتور المنسي باستخدام البريد الإلكتروني أو كلمة المرور
 app.post('/recover-doctor-access-code', async (req, res) => {
   try {
     const { doctorId, originalAccountCode } = req.body;
@@ -5779,9 +5779,16 @@ app.post('/recover-doctor-access-code', async (req, res) => {
       return res.status(404).json({ error: 'الدكتور غير موجود' });
     }
     
-    // التحقق من الرمز الأصلي للحساب (هذا الرمز الذي أنشأته إدارة النظام)
-    // يمكنك تعديل هذا التحقق حسب نظام الرموز الأصلي لديك
-    if (originalAccountCode !== doctor.originalAccessCode) {
+    // التحقق من الرمز الأصلي للحساب (البريد الإلكتروني أو كلمة المرور)
+    const isValidEmail = originalAccountCode === doctor.email;
+    const isValidPassword = originalAccountCode === doctor.password;
+    
+    if (!isValidEmail && !isValidPassword) {
+      console.log('❌ رمز غير صحيح:', { 
+        entered: originalAccountCode, 
+        doctorEmail: doctor.email,
+        doctorId: doctorId 
+      });
       return res.status(401).json({ error: 'الرمز الأصلي للحساب غير صحيح' });
     }
     
