@@ -5745,23 +5745,33 @@ app.post('/setup-doctor-access-code', async (req, res) => {
       return res.status(404).json({ error: 'الدكتور غير موجود' });
     }
     
-    // التحقق من عدم وجود رمز مسبق
-    const existingAccess = await DoctorAccessCode.findOne({ doctorId });
-    if (existingAccess) {
-      return res.status(400).json({ error: 'تم إعداد رمز دخول للدكتور مسبقًا' });
+    // البحث عن رمز موجود أو إنشاء رمز جديد
+    let doctorAccess = await DoctorAccessCode.findOne({ doctorId });
+    
+    if (doctorAccess) {
+      // تحديث الرمز الموجود
+      doctorAccess.accessCode = accessCode;
+      doctorAccess.updatedAt = new Date();
+      await doctorAccess.save();
+      
+      res.json({ 
+        success: true, 
+        message: 'تم تحديث رمز دخول الدكتور بنجاح'
+      });
+    } else {
+      // إنشاء رمز جديد
+      doctorAccess = new DoctorAccessCode({
+        doctorId,
+        accessCode
+      });
+      
+      await doctorAccess.save();
+      
+      res.json({ 
+        success: true, 
+        message: 'تم إعداد رمز دخول للدكتور بنجاح'
+      });
     }
-    
-    const doctorAccess = new DoctorAccessCode({
-      doctorId,
-      accessCode
-    });
-    
-    await doctorAccess.save();
-    
-    res.json({ 
-      success: true, 
-      message: 'تم إعداد رمز دخول للدكتور بنجاح'
-    });
   } catch (error) {
     console.error('خطأ في إعداد رمز الدكتور:', error);
     res.status(500).json({ error: 'حدث خطأ في إعداد الرمز' });
@@ -5782,6 +5792,15 @@ app.post('/recover-doctor-access-code', async (req, res) => {
     // التحقق من الرمز الأصلي للحساب (البريد الإلكتروني أو كلمة المرور)
     const isValidEmail = originalAccountCode === doctor.email;
     const isValidPassword = originalAccountCode === doctor.password;
+    
+    console.log('🔍 التحقق من الرمز:', { 
+      entered: originalAccountCode, 
+      doctorEmail: doctor.email,
+      doctorPassword: doctor.password,
+      isValidEmail: isValidEmail,
+      isValidPassword: isValidPassword,
+      doctorId: doctorId 
+    });
     
     if (!isValidEmail && !isValidPassword) {
       console.log('❌ رمز غير صحيح:', { 
